@@ -14,8 +14,8 @@ export function statusHint(status: Status): string {
     case 'no-provider':
       return 'Choose a provider';
     case 'no-key':
-      // getStatus always sets the provider here. Every label takes "an": OpenAI, Anthropic, xAI (Grok), OpenRouter.
-      return `Add an ${PROVIDERS[status.provider!].label} API key`;
+      // getStatus always sets the provider here.
+      return `Add your ${PROVIDERS[status.provider!].label} API key`;
   }
 }
 

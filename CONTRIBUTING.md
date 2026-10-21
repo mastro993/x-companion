@@ -104,7 +104,7 @@ x-companion has three parts that talk through extension messages, plus the provi
   - Follows the system light or dark theme.
   - Keeps all state in extension storage.
 - **Large language model (LLM) adapters** (`src/lib/llm.ts`):
-  - Two request paths: Chat Completions (OpenAI, xAI, OpenRouter) and Anthropic Messages.
+  - Two request paths: Chat Completions (OpenAI, xAI, DeepSeek, OpenRouter) and Anthropic Messages.
   - Request low reasoning effort when the model supports it.
 - **Jev adapter** (`src/lib/jev.ts`), not used yet:
   - Asks [Jev](https://docs.typesafe.ai/introduction), TypeSafe's decision model, typed questions about some state: yes/no, pick one option or rate on a scale. The answers come back typed, with probabilities instead of text.

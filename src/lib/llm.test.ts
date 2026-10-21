@@ -37,6 +37,7 @@ describe('generateText request shape', () => {
   it.each([
     ['openai', 'https://api.openai.com/v1/chat/completions', 'max_completion_tokens'],
     ['xai', 'https://api.x.ai/v1/chat/completions', 'max_completion_tokens'],
+    ['deepseek', 'https://api.deepseek.com/chat/completions', 'max_tokens'],
     ['openrouter', 'https://openrouter.ai/api/v1/chat/completions', 'max_tokens'],
   ] as const)('%s uses Chat Completions', async (provider, url, capField) => {
     const fn = mockFetch(() => chatOk('Nice take'));
@@ -133,6 +134,9 @@ describe('generateText errors', () => {
         }),
       'Provider disconnected',
     ],
+    ['DeepSeek overloaded with partial content', 'deepseek', () => chatOk('Half a rep', 'insufficient_system_resource'), 'failed to generate'],
+    ['DeepSeek aborted', 'deepseek', () => chatOk(null, 'aborted'), 'failed to generate'],
+    ['content filter', 'deepseek', () => chatOk('Half a rep', 'content_filter'), 'declined'],
     ['chat truncation', 'xai', () => chatOk('Cut mid', 'length'), 'cut off'],
     ['anthropic truncation', 'anthropic', () => json({ stop_reason: 'max_tokens', content: [{ type: 'text', text: 'Cut' }] }), 'cut off'],
     ['openai refusal', 'openai', () => json({ choices: [{ message: { content: null, refusal: 'No.' } }] }), 'declined'],
@@ -220,6 +224,27 @@ describe('listModels', () => {
       url.endsWith('/key') ? json({ error: { message: 'User not found.', code: 401 } }, 401) : json({ data: [] }),
     );
     await expect(listModels('openrouter', 'k')).rejects.toThrow('Invalid API key');
+  });
+
+  it('deepseek reads display names and effort levels from /models', async () => {
+    const fn = mockFetch(() =>
+      json({
+        object: 'list',
+        data: [
+          { id: 'deepseek-v4-pro', object: 'model', owned_by: 'deepseek', name: 'DeepSeek-V4-Pro', effort: { supported_levels: ['low', 'high', 'max'], default_level: 'high' } },
+          { id: 'deepseek-flash', object: 'model', owned_by: 'deepseek', name: 'DeepSeek-V4.1-Flash', effort: { supported_levels: ['low', 'high', 'max'] } },
+          { id: 'deepseek-bare', object: 'model', owned_by: 'deepseek' },
+        ],
+      }),
+    );
+    const models = await listModels('deepseek', 'k');
+    expect(call(fn).url).toBe('https://api.deepseek.com/models');
+    expect(call(fn).headers.authorization).toBe('Bearer k');
+    expect(models).toEqual([
+      { id: 'deepseek-bare', label: 'deepseek-bare', lowEffort: false },
+      { id: 'deepseek-v4-pro', label: 'DeepSeek-V4-Pro', lowEffort: true },
+      { id: 'deepseek-flash', label: 'DeepSeek-V4.1-Flash', lowEffort: true },
+    ]);
   });
 
   it('anthropic lists active models and gates effort on capabilities', async () => {

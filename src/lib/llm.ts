@@ -10,11 +10,12 @@ export interface LlmConfig {
 const CHAT_BASE = {
   openai: 'https://api.openai.com/v1',
   xai: 'https://api.x.ai/v1',
+  deepseek: 'https://api.deepseek.com',
   openrouter: 'https://openrouter.ai/api/v1',
 } as const;
 const ANTHROPIC_BASE = 'https://api.anthropic.com/v1';
 
-// Holds reasoning tokens too (OpenAI, OpenRouter, Anthropic), so it can't be tight.
+// Holds reasoning tokens too (OpenAI, OpenRouter, Anthropic, DeepSeek), so it can't be tight.
 const MAX_OUTPUT_TOKENS = 2048;
 const TIMEOUT_MS = 60_000;
 
@@ -110,13 +111,16 @@ export function postJson(provider: ProviderId | 'typesafe', apiKey: string, body
   };
 }
 
+// Generation stopped midway, so content may hold a partial reply. OpenRouter: 'error' (the
+// upstream failed). DeepSeek: 'insufficient_system_resource' (overloaded) and 'aborted'.
+const INTERRUPTED = ['error', 'insufficient_system_resource', 'aborted'];
+
 function chatText(res: ChatResponse): string {
   const c = res.choices?.[0];
-  // OpenRouter: the upstream failed mid-generation; content may hold a partial reply.
-  if (c?.error || c?.finish_reason === 'error') {
-    throw new Error(c.error?.message ?? 'The provider failed to generate a reply.');
+  if (c?.error || INTERRUPTED.includes(c?.finish_reason ?? '')) {
+    throw new Error(c?.error?.message ?? 'The provider failed to generate a reply.');
   }
-  if (c?.message?.refusal) throw new Error(DECLINED);
+  if (c?.message?.refusal || c?.finish_reason === 'content_filter') throw new Error(DECLINED);
   if (c?.finish_reason === 'length') throw new Error(CUT_OFF);
   return c?.message?.content ?? '';
 }
@@ -158,9 +162,11 @@ export async function generateText(cfg: LlmConfig, prompt: Prompt): Promise<stri
                 { role: 'system', content: prompt.system },
                 { role: 'user', content: prompt.user },
               ],
-              // Many OpenRouter models list only max_tokens; OpenAI and xAI deprecated it.
-              [provider === 'openrouter' ? 'max_tokens' : 'max_completion_tokens']:
-                MAX_OUTPUT_TOKENS,
+              // Many OpenRouter models list only max_tokens, and DeepSeek ignores
+              // max_completion_tokens; OpenAI and xAI deprecated max_tokens.
+              [provider === 'openrouter' || provider === 'deepseek'
+                ? 'max_tokens'
+                : 'max_completion_tokens']: MAX_OUTPUT_TOKENS,
               ...(model.lowEffort && { reasoning_effort: 'low' }),
               ...(provider === 'openai' && { store: false }),
             }),
@@ -207,6 +213,17 @@ async function fetchModels(provider: ProviderId, apiKey: string): Promise<ModelO
           lowEffort:
             m.capabilities?.reasoning_effort?.includes('low') ?? !m.id.includes('non-reasoning'),
         }));
+    }
+    case 'deepseek': {
+      // All DeepSeek models output text, so nothing is filtered. Only id is guaranteed.
+      const { data } = await fetchJson<{
+        data?: { id: string; name?: string; effort?: { supported_levels?: string[] } }[];
+      }>(`${CHAT_BASE.deepseek}/models`, init, timeout);
+      return (data ?? []).map((m) => ({
+        id: m.id,
+        label: m.name ?? m.id,
+        lowEffort: m.effort?.supported_levels?.includes('low') === true,
+      }));
     }
     case 'openrouter': {
       // /models is public, so /key is what validates the key.

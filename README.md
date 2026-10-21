@@ -16,6 +16,7 @@ You bring your own API key from one of these providers:
 - OpenAI
 - Anthropic
 - xAI (Grok)
+- DeepSeek
 - OpenRouter
 
 ## Privacy and security
@@ -25,7 +26,7 @@ x-companion has no backend. It talks only to x.com and the provider you pick:
 - **Your keys stay in your browser**: API keys and settings live in `chrome.storage.local`, restricted to trusted extension contexts (`setAccessLevel('TRUSTED_CONTEXTS')`). Only the background service worker and the side panel can read them; the content script on x.com can't. Keys aren't synced across devices, and like all extension storage, they're stored unencrypted in your browser profile.
 - **Post text goes only to your provider**: when you run an action, the extension sends the post's author handle, its text, any quoted post and image alt text to the provider you selected, along with your style guide, your projects and, for a rewrite, the text in the reply box. There's no analytics or telemetry. OpenAI requests are sent with `store: false`.
 - **It never posts**: the extension only replaces the text in the reply box. Nothing reaches X until you click **Reply**.
-- **Minimal permissions**: `storage` and `sidePanel`, plus host access to x.com, the four provider APIs and TypeSafe's API, which nothing uses yet. It doesn't request the `tabs` permission.
+- **Minimal permissions**: `storage` and `sidePanel`, plus host access to x.com, the five provider APIs and TypeSafe's API, which nothing uses yet. It doesn't request the `tabs` permission.
 - **The page can't drive it**: the content script acts only on real (trusted) user clicks. The background checks that each message comes from an x.com tab, validates its shape and caps field lengths. The prompt wraps post text and your draft in delimiters and tells the model to treat them as material, not instructions.
 
 ## Requirements
