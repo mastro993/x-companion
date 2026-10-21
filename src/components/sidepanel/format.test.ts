@@ -16,6 +16,6 @@ describe('statusHint', () => {
   it.each([
     [{ ready: true, provider: 'anthropic', model } as const, 'Replies: Anthropic · Claude Haiku 5.5'],
     [{ ready: false, reason: 'no-provider', provider: null } as const, 'Choose a provider'],
-    [{ ready: false, reason: 'no-key', provider: 'xai' } as const, 'Add an xAI (Grok) API key'],
+    [{ ready: false, reason: 'no-key', provider: 'xai' } as const, 'Add your xAI (Grok) API key'],
   ])('%o', (status, hint) => expect(statusHint(status)).toBe(hint));
 });

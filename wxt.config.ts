@@ -26,6 +26,7 @@ export default defineConfig({
       'https://api.openai.com/*',
       'https://api.anthropic.com/*',
       'https://api.x.ai/*',
+      'https://api.deepseek.com/*',
       'https://openrouter.ai/*',
       // Jev with a TypeSafe key (src/lib/jev.ts). TypeSafe's CORS rejects extension origins.
       'https://api.typesafe.ai/*',

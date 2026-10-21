@@ -1,4 +1,4 @@
-export const PROVIDER_IDS = ['openai', 'anthropic', 'xai', 'openrouter'] as const;
+export const PROVIDER_IDS = ['openai', 'anthropic', 'xai', 'deepseek', 'openrouter'] as const;
 export type ProviderId = (typeof PROVIDER_IDS)[number];
 
 export interface ModelOption {
@@ -33,6 +33,12 @@ export const PROVIDERS: Record<ProviderId, ProviderInfo> = {
     keyPlaceholder: 'xai-…',
     keysUrl: 'https://console.x.ai',
     defaultModel: { id: 'grok-4.3', label: 'grok-4.3', lowEffort: true },
+  },
+  deepseek: {
+    label: 'DeepSeek',
+    keyPlaceholder: 'sk-…',
+    keysUrl: 'https://platform.deepseek.com/api_keys',
+    defaultModel: { id: 'deepseek-flash', label: 'DeepSeek-V4.1-Flash', lowEffort: true },
   },
   openrouter: {
     label: 'OpenRouter',

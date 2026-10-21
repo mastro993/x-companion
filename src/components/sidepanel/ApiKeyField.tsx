@@ -81,7 +81,7 @@ export function ApiKeyField({ provider, savedKey, checking, error, modelCount, o
       </InputGroup>
       <FieldDescription className="flex flex-wrap justify-between gap-x-3">
         <a href={keysUrl} target="_blank" rel="noreferrer">
-          Get an {label} key ↗
+          Get your {label} key ↗
         </a>
         <span role="status" className="inline-flex items-center gap-1">
           {checking
