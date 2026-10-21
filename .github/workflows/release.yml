@@ -76,10 +76,13 @@ jobs:
       contents: write # push the bump commit and tag, create the release
 
     steps:
-      # Keeps the git credentials for the push below.
+      # Checks out with the release deploy key and keeps it for the push below.
+      # The main branch ruleset blocks direct pushes but lets deploy keys
+      # bypass it; GITHUB_TOKEN can't bypass it.
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
           persist-credentials: true
 
       - name: Download zip

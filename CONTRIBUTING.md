@@ -82,6 +82,8 @@ The owner releases by hand with the **Release** workflow (`.github/workflows/rel
 
 The workflow type checks and tests the code, bumps the version in `package.json`, and builds the zip. It then pushes a `chore(release): v<version>` commit and a `v<version>` tag to `main`, and publishes a GitHub release with the zip attached. The release notes list the pull requests merged since the previous tag, by title, so write titles that read well in a changelog.
 
+The `main` ruleset only accepts changes through pull requests, so the workflow pushes with a deploy key, which the ruleset lets bypass it. The key's private half is stored in the `RELEASE_DEPLOY_KEY` Actions secret, and its public half is a deploy key on the repository with write access.
+
 If `main` moves while the workflow runs, for example because someone merged a pull request or another release finished first, the push fails and nothing is released. Start a new run with **Run workflow**: **Re-run jobs** on the failed run reuses its old commit and fails the same way.
 
 ## How the extension works
