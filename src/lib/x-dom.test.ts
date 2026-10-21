@@ -2,13 +2,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   composerOf,
+  type ControlsState,
   findReplyComposers,
   getTargetPost,
-  injectButton,
-  injectedButtons,
+  injectControls,
+  injectedControls,
+  readEditor,
+  renderControls,
   setComposerText,
   showAlert,
-  updateButton,
 } from './x-dom';
 
 // Hand-written minimal fixtures mimicking X's 2026 DOM (testids, Draft.js blocks, #layers dialogs).
@@ -35,24 +37,27 @@ function page(path: string, layers: string, main = '') {
   history.replaceState(null, '', path);
   document.body.innerHTML = `<div id="layers">${layers}</div><div><main>${main}</main></div>`;
 }
-const scan = () => findReplyComposers().map((c) => injectButton(c, () => {}));
+const scan = () => findReplyComposers().map((c) => injectControls(c, () => {}));
+
+// happy-dom has the popover attribute but not its methods.
+HTMLElement.prototype.hidePopover = vi.fn();
 
 afterEach(() => {
   document.body.innerHTML = '';
 });
 
-describe('findReplyComposers + injectButton', () => {
+describe('findReplyComposers + injectControls', () => {
   it('reply dialog: injects before Reply, targets the original above the editor', () => {
     page(
       '/compose/post',
       `<div role="dialog">${tweet('alice', '111', text('Original'), 'tabindex="-1"')}${editor()}${toolbar('tweetButton')}</div>`,
       tweet('home', '1', text('Timeline post'), 'tabindex="0"'),
     );
-    const [btn] = scan();
+    const [wrap] = scan();
     const host = document.querySelector('.host')!;
-    expect(host.firstElementChild?.firstElementChild).toBe(btn);
+    expect(host.firstElementChild).toBe(wrap);
     expect(host.lastElementChild?.getAttribute('data-testid')).toBe('tweetButton');
-    expect(getTargetPost(composerOf(btn!)!)?.text).toBe('Original');
+    expect(getTargetPost(composerOf(wrap!)!)?.text).toBe('Original');
   });
 
   it('status page inline composer: focal article from main, not a #layers article', () => {
@@ -65,16 +70,16 @@ describe('findReplyComposers + injectButton', () => {
         toolbar('tweetButtonInline') +
         tweet('carol', '333', text('Reply below'), 'tabindex="0"'),
     );
-    const [btn, ...rest] = scan();
+    const [wrap, ...rest] = scan();
     expect(rest).toEqual([]);
-    expect(getTargetPost(composerOf(btn!)!)).toMatchObject({ author: '@alice', text: 'Focal' });
+    expect(getTargetPost(composerOf(wrap!)!)).toMatchObject({ author: '@alice', text: 'Focal' });
   });
 
   it('narrow layout: /compose/post rendered as a page in main gets a button', () => {
     page('/compose/post', '', tweet('alice', '111', text('Original')) + editor() + toolbar('tweetButton'));
-    const [btn] = scan();
-    expect(btn).toBeTruthy();
-    expect(getTargetPost(composerOf(btn!)!)?.author).toBe('@alice');
+    const [wrap] = scan();
+    expect(wrap).toBeTruthy();
+    expect(getTargetPost(composerOf(wrap!)!)?.author).toBe('@alice');
   });
 
   it.each([
@@ -101,50 +106,117 @@ describe('findReplyComposers + injectButton', () => {
     page('/alice/status/222', '', tweet('alice', '222', text('Focal')) + editor() + toolbar('tweetButtonInline'));
     scan();
     expect(scan()).toEqual([null]);
-    expect(injectedButtons()).toHaveLength(1);
+    expect(injectedControls()).toHaveLength(1);
     document.querySelector('[data-xc-reply]')!.remove();
     scan();
-    expect(injectedButtons()).toHaveLength(1);
+    expect(injectedControls()).toHaveLength(1);
+  });
+
+  it('showAlert flips below the controls when there is no room above', () => {
+    page('/alice/status/222', '', tweet('alice', '222', text('Focal')) + editor() + toolbar('tweetButtonInline'));
+    const [wrap] = scan() as HTMLElement[];
+    wrap!.getBoundingClientRect = () => ({ top: 400 }) as DOMRect;
+    showAlert(wrap!, 'Oops');
+    expect(wrap!.querySelector('.xc-reply-alert--below')).toBeNull();
+    wrap!.getBoundingClientRect = () => ({ top: 0 }) as DOMRect;
+    showAlert(wrap!, 'Oops');
+    expect(wrap!.querySelectorAll('.xc-reply-alert')).toHaveLength(1);
+    expect(wrap!.querySelector('.xc-reply-alert--below')).not.toBeNull();
+  });
+});
+
+describe('controls', () => {
+  const onClick = vi.fn();
+  let wrap: HTMLElement;
+  beforeEach(() => {
+    onClick.mockClear();
+    page('/alice/status/222', '', tweet('alice', '222', text('Focal')) + editor() + toolbar('tweetButtonInline'));
+    wrap = injectControls(findReplyComposers()[0]!, onClick)!;
+  });
+
+  const ready: ControlsState = { ready: true, busy: null, hasText: false };
+  const pills = () => [...wrap.querySelectorAll<HTMLButtonElement>('.xc-reply-btn')].filter((b) => !b.hidden);
+  const shown = () => {
+    const [btn, ...rest] = pills();
+    expect(rest).toEqual([]);
+    return btn!;
+  };
+  const menu = () => wrap.querySelector<HTMLElement>('.xc-menu')!;
+  const trustedClick = (el: Element) => {
+    const e = new MouseEvent('click', { bubbles: true, cancelable: true });
+    Object.defineProperty(e, 'isTrusted', { value: true });
+    el.dispatchEvent(e);
+    return e;
+  };
+
+  it('offers Generate on an empty box and Rewrite, with its menu, once the box has text', () => {
+    renderControls(wrap, ready);
+    expect(shown().textContent).toBe('Generate');
+    expect(shown().getAttribute('aria-label')).toBe('Generate reply with x-companion');
+
+    renderControls(wrap, { ...ready, hasText: true });
+    expect(shown().textContent).toBe('Rewrite');
+    expect(shown().popoverTargetElement).toBe(menu());
+    expect([...menu().children].map((i) => i.textContent)).toEqual(['Polish', 'Punchier', 'Match style']);
+  });
+
+  it('setup: greyed with a hint, and the Rewrite menu stays shut', () => {
+    renderControls(wrap, { ...ready, ready: false, hasText: true });
+    expect(shown().getAttribute('aria-disabled')).toBe('true');
+    expect(shown().title).toBe('x-companion: finish setup in the side panel');
+    expect(shown().popoverTargetElement).toBeNull();
+    // The click reaches the content script, which opens the side panel.
+    expect(trustedClick(shown()).defaultPrevented).toBe(true);
+    expect(onClick).toHaveBeenCalledWith(shown(), null);
+  });
+
+  it('busy: the running action shows on its pill, whatever the box holds', () => {
+    renderControls(wrap, { ...ready, busy: 'polish', hasText: false });
+    expect(shown().textContent).toBe('Polishing…');
+    expect(shown().getAttribute('aria-busy')).toBe('true');
+    expect(shown().getAttribute('aria-label')).toBe('Rewriting draft with x-companion');
+    expect(shown().popoverTargetElement).toBeNull();
+
+    renderControls(wrap, { ...ready, busy: 'reply', hasText: true });
+    expect(shown().textContent).toBe('Generating…');
+    renderControls(wrap, ready);
+    expect(shown().hasAttribute('aria-busy')).toBe(false);
+    expect(shown().hasAttribute('aria-disabled')).toBe(false);
+  });
+
+  it('re-rendering an unchanged state causes no childList mutation', () => {
+    renderControls(wrap, { ...ready, hasText: true });
+    const observer = new MutationObserver(() => {});
+    observer.observe(wrap, { childList: true, subtree: true });
+    renderControls(wrap, { ...ready, hasText: true });
+    expect(observer.takeRecords()).toEqual([]);
+  });
+
+  it('armed Rewrite pill leaves the click to the native popover toggle', () => {
+    renderControls(wrap, { ...ready, hasText: true });
+    expect(trustedClick(shown()).defaultPrevented).toBe(false);
+    expect(onClick).not.toHaveBeenCalled();
+  });
+
+  it('menu items run their action and close the menu', () => {
+    renderControls(wrap, { ...ready, hasText: true });
+    const punchier = [...menu().children].find((i) => i.textContent === 'Punchier')!;
+    vi.mocked(HTMLElement.prototype.hidePopover).mockClear();
+    trustedClick(punchier);
+    expect(onClick).toHaveBeenCalledWith(punchier, 'punchier');
+    expect(HTMLElement.prototype.hidePopover).toHaveBeenCalled();
   });
 
   it('ignores untrusted (scripted) clicks', () => {
-    page('/alice/status/222', '', tweet('alice', '222', text('Focal')) + editor() + toolbar('tweetButtonInline'));
-    const onClick = vi.fn();
-    const btn = injectButton(findReplyComposers()[0]!, onClick)!;
-    btn.click();
-    btn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    renderControls(wrap, ready);
+    const item = menu().firstElementChild as HTMLElement;
+    for (const el of [shown(), item]) {
+      el.click();
+      el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    }
     expect(onClick).not.toHaveBeenCalled();
-    const real = new MouseEvent('click');
-    Object.defineProperty(real, 'isTrusted', { value: true });
-    btn.dispatchEvent(real);
-    expect(onClick).toHaveBeenCalledOnce();
-  });
-
-  it('showAlert flips below the button when there is no room above', () => {
-    page('/alice/status/222', '', tweet('alice', '222', text('Focal')) + editor() + toolbar('tweetButtonInline'));
-    const [btn] = scan() as HTMLButtonElement[];
-    const wrap = btn!.parentElement!;
-    wrap.getBoundingClientRect = () => ({ top: 400 }) as DOMRect;
-    showAlert(btn!, 'Oops');
-    expect(wrap.querySelector('.xc-reply-alert--below')).toBeNull();
-    wrap.getBoundingClientRect = () => ({ top: 0 }) as DOMRect;
-    showAlert(btn!, 'Oops');
-    expect(wrap.querySelector('.xc-reply-alert--below')).not.toBeNull();
-  });
-
-  it('updateButton reflects ready / setup / busy', () => {
-    page('/alice/status/222', '', tweet('alice', '222', text('Focal')) + editor() + toolbar('tweetButtonInline'));
-    const [btn] = scan() as HTMLButtonElement[];
-    updateButton(btn!, 'setup');
-    expect(btn!.getAttribute('aria-disabled')).toBe('true');
-    expect(btn!.title).toBe('x-companion: finish setup in the side panel');
-    updateButton(btn!, 'busy');
-    expect(btn!.hasAttribute('aria-disabled')).toBe(false);
-    expect(btn!.getAttribute('aria-busy')).toBe('true');
-    expect(btn!.textContent).toBe('Generating…');
-    updateButton(btn!, 'ready');
-    expect(btn!.hasAttribute('aria-busy')).toBe(false);
-    expect(btn!.getAttribute('aria-label')).toBe('Generate reply with x-companion');
+    trustedClick(shown());
+    expect(onClick).toHaveBeenCalledExactlyOnceWith(shown(), 'reply');
   });
 });
 
@@ -183,6 +255,16 @@ describe('getTargetPost', () => {
   it("the quote's Show more does not flag the post as truncated", () => {
     const quote = `<div role="link">${text('Long quoted')}<a href="/bob" data-testid="tweet-text-show-more-link">Show more</a></div>`;
     expect(dialogPost(text('Short') + quote)?.truncated).toBe(false);
+  });
+});
+
+describe('readEditor', () => {
+  it('reads Draft blocks one per line, and an empty Draft editor as ""', () => {
+    page('/home', '', editor());
+    const ed = document.querySelector<HTMLElement>('[data-testid="tweetTextarea_0"]')!;
+    expect(readEditor(ed)).toBe('');
+    ed.firstElementChild!.innerHTML = '<div data-block="true"><span>One</span></div><div data-block="true"><span></span></div><div data-block="true"><span>Three</span></div>';
+    expect(readEditor(ed)).toBe('One\n\nThree');
   });
 });
 

@@ -2,13 +2,9 @@ import { browser } from 'wxt/browser';
 import { defineBackground } from 'wxt/utils/define-background';
 import { isXUrl, parseRequest } from '@/lib/background-utils';
 import { generateText } from '@/lib/llm';
-import type {
-  ContentPush,
-  GenerateReplyResponse,
-  StatusResponse,
-  TargetPost,
-} from '@/lib/messages';
-import { buildReplyPrompt, cleanReply } from '@/lib/prompt';
+import type { ActionResponse, BackgroundRequest, ContentPush, StatusResponse } from '@/lib/messages';
+import { PROMPTS } from '@/lib/prompts';
+import { cleanReply } from '@/lib/prompts/shared';
 import { getStatus, settingsItem } from '@/lib/settings';
 
 // Tab-specific panel only (the manifest has no side_panel). setOptions is idempotent:
@@ -39,7 +35,11 @@ async function pushStatus(ready: boolean): Promise<void> {
   }
 }
 
-async function generateReply(post: TargetPost): Promise<string> {
+async function runAction({
+  action,
+  post,
+  draft,
+}: Extract<BackgroundRequest, { type: 'run-action' }>): Promise<string> {
   const settings = await settingsItem.getValue();
   const status = getStatus(settings);
   if (!status.ready) throw new Error('Finish setup in the x-companion side panel');
@@ -50,8 +50,13 @@ async function generateReply(post: TargetPost): Promise<string> {
     const text = cleanReply(
       await generateText(
         { provider: status.provider, apiKey, model: status.model },
-        buildReplyPrompt(post, settings.style),
+        PROMPTS[action]({
+          context: { post, draft },
+          style: settings.style,
+          projects: settings.projects,
+        }),
       ),
+      draft,
     );
     if (!text) throw new Error('The model returned an empty reply. Try again.');
     return text;
@@ -98,14 +103,14 @@ export default defineBackground(() => {
           () => sendResponse({ ready: false } satisfies StatusResponse),
         );
         return true;
-      case 'generate-reply':
-        generateReply(req.post).then(
-          (text) => sendResponse({ ok: true, text } satisfies GenerateReplyResponse),
+      case 'run-action':
+        runAction(req).then(
+          (text) => sendResponse({ ok: true, text } satisfies ActionResponse),
           (e: unknown) =>
             sendResponse({
               ok: false,
               error: e instanceof Error ? e.message : String(e),
-            } satisfies GenerateReplyResponse),
+            } satisfies ActionResponse),
         );
         return true;
     }

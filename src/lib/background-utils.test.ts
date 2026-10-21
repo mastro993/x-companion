@@ -19,30 +19,33 @@ describe('isXUrl', () => {
 describe('parseRequest', () => {
   const post = { author: '@a', text: 'hi', quoted: '', images: ['alt'], truncated: false };
 
+  const run = { type: 'run-action', action: 'polish', post, draft: 'my draft' };
+
   it('accepts the known shapes and drops extra fields', () => {
     expect(parseRequest({ type: 'get-status', extra: 1 })).toEqual({ type: 'get-status' });
     expect(parseRequest({ type: 'open-side-panel' })).toEqual({ type: 'open-side-panel' });
-    expect(parseRequest({ type: 'generate-reply', post: { ...post, url: 'https://evil' } })).toEqual({
-      type: 'generate-reply',
-      post,
-    });
+    expect(parseRequest({ ...run, extra: 1, post: { ...post, url: 'https://evil' } })).toEqual(run);
   });
 
   it.each([
     ['null', null],
     ['string', 'get-status'],
     ['unknown type', { type: 'set-settings' }],
-    ['missing post', { type: 'generate-reply' }],
-    ['missing field', { type: 'generate-reply', post: { ...post, quoted: undefined } }],
-    ['non-string image', { type: 'generate-reply', post: { ...post, images: [1] } }],
-    ['non-boolean truncated', { type: 'generate-reply', post: { ...post, truncated: 'no' } }],
+    ['unknown action', { ...run, action: 'summarize' }],
+    ['inherited action name', { ...run, action: 'toString' }],
+    ['missing draft', { ...run, draft: undefined }],
+    ['over-long draft', { ...run, draft: 'd'.repeat(8001) }],
+    ['missing post', { ...run, post: undefined }],
+    ['missing field', { ...run, post: { ...post, quoted: undefined } }],
+    ['non-string image', { ...run, post: { ...post, images: [1] } }],
+    ['non-boolean truncated', { ...run, post: { ...post, truncated: 'no' } }],
   ])('rejects %s', (_, msg) => {
     expect(parseRequest(msg)).toBeNull();
   });
 
   it('caps field lengths', () => {
     const req = parseRequest({
-      type: 'generate-reply',
+      ...run,
       post: {
         author: 'a'.repeat(150),
         text: 't'.repeat(9000),
@@ -51,7 +54,7 @@ describe('parseRequest', () => {
         truncated: true,
       },
     });
-    if (req?.type !== 'generate-reply') throw new Error('expected generate-reply');
+    if (req?.type !== 'run-action') throw new Error('expected run-action');
     expect(req.post.author).toHaveLength(100);
     expect(req.post.text).toHaveLength(8000);
     expect(req.post.quoted).toHaveLength(8000);

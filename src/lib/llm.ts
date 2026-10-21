@@ -1,14 +1,10 @@
+import type { Prompt } from './prompts/types';
 import type { ModelOption, ProviderId } from './providers';
 
 export interface LlmConfig {
   provider: ProviderId;
   apiKey: string;
   model: ModelOption;
-}
-
-export interface Prompt {
-  system: string;
-  user: string;
 }
 
 const CHAT_BASE = {

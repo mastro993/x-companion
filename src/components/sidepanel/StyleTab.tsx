@@ -1,4 +1,3 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Field,
   FieldDescription,
@@ -13,16 +12,8 @@ import {
   InputGroupText,
   InputGroupTextarea,
 } from '@/components/ui/input-group';
-import { updateSettings } from '@/hooks/use-settings';
-import {
-  MAX_STYLE_FIELD_LENGTH,
-  settingsItem,
-  STYLE_FIELDS,
-  type Settings,
-  type StyleField,
-} from '@/lib/settings';
-
-const SAVE_DELAY_MS = 400;
+import { useAutosave } from '@/hooks/use-autosave';
+import { MAX_STYLE_FIELD_LENGTH, STYLE_FIELDS, type Settings, type StyleField } from '@/lib/settings';
 
 const SECTIONS: Record<StyleField, { label: string; description: string; placeholder: string }> = {
   persona: {
@@ -64,49 +55,12 @@ export function StyleTab({ settings }: { settings: Settings }) {
   );
 }
 
-const withSection = (s: Settings, field: StyleField, text: string): Settings => ({
-  ...s,
-  style: { ...s.style, [field]: text },
-});
-
 function StyleSection({ field, settings }: { field: StyleField; settings: Settings }) {
   const { label, description, placeholder } = SECTIONS[field];
-  const value = settings.style[field];
-  const [draft, setDraft] = useState(value);
-  const [saved, setSaved] = useState(false);
-  const pending = useRef<string | null>(null);
-  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const latest = useRef(settings);
-  latest.current = settings;
-
-  const flush = useCallback(() => {
-    clearTimeout(timer.current);
-    const text = pending.current;
-    if (text === null) return;
-    pending.current = null;
-    void updateSettings((s) => withSection(s, field, text)).then(() => setSaved(true));
-  }, [field]);
-
-  useEffect(() => {
-    // The panel is being torn down: updateSettings' read round trip would never finish,
-    // so write the last known settings in a single call.
-    const onPageHide = () => {
-      const text = pending.current;
-      if (text === null) return;
-      pending.current = null;
-      void settingsItem.setValue(withSection(latest.current, field, text));
-    };
-    addEventListener('pagehide', onPageHide);
-    return () => {
-      removeEventListener('pagehide', onPageHide);
-      flush(); // switching tabs unmounts this panel
-    };
-  }, [field, flush]);
-
-  // Follow changes made elsewhere (another tab's panel) unless the user has unsaved edits.
-  useEffect(() => {
-    if (pending.current === null) setDraft(value);
-  }, [value]);
+  const { draft, status, onChange, flush } = useAutosave(settings, settings.style[field], (s, text) => ({
+    ...s,
+    style: { ...s.style, [field]: text },
+  }));
 
   const id = `style-${field}`;
   return (
@@ -123,18 +77,12 @@ function StyleSection({ field, settings }: { field: StyleField; settings: Settin
           aria-invalid={draft.length > MAX_STYLE_FIELD_LENGTH}
           aria-describedby={`${id}-help ${id}-count`}
           placeholder={placeholder}
-          onChange={(e) => {
-            setDraft(e.target.value);
-            setSaved(false);
-            pending.current = e.target.value;
-            clearTimeout(timer.current);
-            timer.current = setTimeout(flush, SAVE_DELAY_MS);
-          }}
+          onChange={(e) => onChange(e.target.value)}
           onBlur={flush}
         />
         <InputGroupAddon align="block-end" className="justify-between">
           <InputGroupText role="status" className="text-xs">
-            {saved && 'Saved'}
+            {status === 'saved' && 'Saved'}
           </InputGroupText>
           <InputGroupText id={`${id}-count`} className="text-xs tabular-nums">
             {draft.length}/{MAX_STYLE_FIELD_LENGTH}
