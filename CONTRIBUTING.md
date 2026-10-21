@@ -162,7 +162,7 @@ Unit tests cover the logic, but they never call a real provider or load the real
 
 ### Run the automated checks
 
-Run `pnpm compile`, `pnpm test` and `pnpm build` before every commit:
+Run `pnpm compile`, `pnpm test` and `pnpm build` before every commit. The CI workflow runs the same three checks on every pull request and every push to `main`:
 
 ```sh
 pnpm test                                # all unit tests, once
