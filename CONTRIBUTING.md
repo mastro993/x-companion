@@ -25,6 +25,7 @@ pnpm dev
 How the dev session behaves:
 
 - **Persistent profile**: the Chrome window uses its own profile in `.wxt/chrome-data`. Log in to X there once, and later runs keep the login.
+- **Fixed extension ID**: dev builds carry a manifest `key`, so their extension ID is always `mogjdmpkbfcfdgedklmkjoploiamddcf`, wherever the checkout lives. Production builds have no key.
 - **Rebuilds**: saving a file rebuilds automatically. The side panel hot-reloads. Background and content-script changes reload the extension; if the button doesn't come back, reload the x.com tab.
 - **One session per checkout**: a second `pnpm dev` takes the next port and overwrites `.output/chrome-mv3-dev`, which breaks the first session.
 - **Extra permissions**: WXT adds the `tabs` and `scripting` permissions to dev builds so it can reload the extension. Check anything permission-related with a production build.
@@ -49,6 +50,16 @@ export default defineWebExtConfig({
 ```
 
 To use your everyday browser profile instead, set `disabled: true` in that file. Then load `.output/chrome-mv3-dev` unpacked while `pnpm dev` runs.
+
+To apply your overrides to every checkout and worktree, put them in `~/.webextrc` instead. It ranks below a checkout's `web-ext.config.ts`, and it uses `key=value` lines:
+
+```ini
+# ~/.webextrc
+binaries.chrome=/Applications/Brave Browser.app/Contents/MacOS/Brave Browser
+chromiumProfile=/Users/you/.wxt-brave-profile
+```
+
+With an absolute `chromiumProfile`, every checkout shares one profile. Thanks to the fixed extension ID, the X login and the side panel's settings (API keys, style guide) carry over between checkouts. The catch is that only one `pnpm dev` session can run at a time.
 
 ## Build for production
 
@@ -142,8 +153,8 @@ The unit tests use Vitest, and the DOM tests run in happy-dom. They cover:
 
 - provider request and response handling, with `fetch` stubbed
 - the prompt builder and message validation
-- settings status
-- the side panel's key field and model reload
+- settings status and the stored-settings migration
+- the side panel's key field, model reload and style guide saving
 - the X DOM logic, against hand-written fixtures
 
 When you fix a bug, add a test that fails without the fix if the code can be tested in happy-dom.
@@ -154,17 +165,17 @@ You need an X account and an API key for at least one provider. Use `pnpm dev`, 
 
 1. **x.com only**: on an x.com tab, click the toolbar icon, and the side panel opens. Switch to any other site, and the panel hides while the icon greys out. Switch back, and both return.
 2. **Setup**:
-   - On the **Provider** tab, choose a provider and paste your key. The panel shows “Key verified · N models”.
+   - On the **Provider** tab, choose a provider and paste your key. The panel shows “Key verified · N models”, and the header changes to **Ready** with the style guide still empty.
    - Paste a wrong key. The panel shows “Invalid API key”.
    - Pick a model.
-   - On the **Style** tab, write a style. The header changes to **Ready**.
+   - On the **Style** tab, fill in each section. Each one shows **Saved** shortly after you stop typing. Switch to **Provider** and back: each section kept its text.
 3. **Button placement**:
    - **Generate** appears left of **Reply** in the reply dialog (the reply icon under a timeline post) and in the inline reply box on a post's own page.
    - It doesn't appear in the home “What's happening?” box, the new-post dialog or the quote dialog.
 4. **Not ready**:
-   - Clear the style. The button turns grey.
+   - Clear the active provider's API key. The button turns grey.
    - Click it. The side panel opens.
-   - Restore the style. The button becomes active without a page reload.
+   - Paste the key again. The button becomes active without a page reload.
 5. **Generate**:
    - Click **Generate**. It shows “Generating…”, then the draft appears in the reply box.
    - Confirm that X's **Reply** button is enabled, that you can edit the text, and that nothing was posted.

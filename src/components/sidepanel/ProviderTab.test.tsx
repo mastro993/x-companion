@@ -16,7 +16,7 @@ it('reloads models when the stored key changes elsewhere', async () => {
   const withKey = (apiKey: string): Settings => ({
     activeProvider: 'openai',
     providers: { openai: { apiKey, model } },
-    style: '',
+    style: { persona: '', audience: '', voice: '', rules: '' },
   });
   const container = document.body.appendChild(document.createElement('div'));
   const root = createRoot(container);

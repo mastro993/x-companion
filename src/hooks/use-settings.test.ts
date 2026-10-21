@@ -8,7 +8,7 @@ describe('setProviderKey', () => {
   const base: Settings = {
     activeProvider: 'anthropic',
     providers: { openai: { apiKey: 'old', model: custom } },
-    style: 's',
+    style: { persona: '', audience: '', voice: 's', rules: '' },
   };
 
   it('picks the provider default model when none is saved, leaving the rest alone', () => {
