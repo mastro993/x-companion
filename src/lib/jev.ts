@@ -3,8 +3,7 @@ import { fetchJson, postJson } from './llm';
 // Jev is TypeSafe's decision model: it answers typed questions about some state with
 // probabilities, not text. OpenRouter serves TypeSafe's System One API under its own base URL
 // and maps bare model IDs onto its typesafe/ namespace, so both routes send the same request.
-// ponytail: nothing calls this yet. Before the typesafe route can run in the extension, add
-// https://api.typesafe.ai/* to host_permissions: its CORS rejects extension origins.
+// Nothing calls this yet.
 const BASE = {
   typesafe: 'https://api.typesafe.ai/v1',
   openrouter: 'https://openrouter.ai/api/v1',

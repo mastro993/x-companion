@@ -109,7 +109,7 @@ x-companion has three parts that talk through extension messages, plus the provi
 - **Jev adapter** (`src/lib/jev.ts`), not used yet:
   - Asks [Jev](https://docs.typesafe.ai/introduction), TypeSafe's decision model, typed questions about some state: yes/no, pick one option or rate on a scale. The answers come back typed, with probabilities instead of text.
   - Sends the same System One request to TypeSafe with a TypeSafe key, or to OpenRouter with an OpenRouter key.
-  - Before anything calls it with a TypeSafe key, add `https://api.typesafe.ai/*` to the host list in `wxt.config.ts`. TypeSafe's CORS rules reject extension origins.
+  - The host list includes `https://api.typesafe.ai/*` for the TypeSafe route, because TypeSafe's CORS rules reject extension origins.
 - **Prompts** (`src/lib/prompts/`):
   - One file per action. Each exports a `PromptBuilder`: a function from `PromptConfig` (the context, meaning the post and the reply box text, plus the style guide and projects) to a system and user message.
   - `PROMPTS` in `index.ts` maps each action in `ACTIONS` (`src/lib/messages.ts`) to its prompt. To add an action, add its ID there, write its prompt file and register it, then give it a label in `src/lib/x-dom.ts`.
