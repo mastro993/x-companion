@@ -63,14 +63,26 @@ With an absolute `chromiumProfile`, every checkout shares one profile. Thanks to
 
 ## Build for production
 
-`pnpm build` writes the extension to `.output/chrome-mv3`, and `pnpm zip` packages it for the Chrome Web Store:
+`pnpm build` writes the extension to `.output/chrome-mv3`, and `pnpm zip` packages it as the zip that releases ship:
 
 ```sh
 pnpm build   # .output/chrome-mv3
 pnpm zip     # .output/x-companion-<version>-chrome.zip
 ```
 
-To load the build, follow the steps in the README's [install section](README.md#install-from-source). After each rebuild, click the reload icon on the extension's card, then reload any open x.com tab.
+To load the build, follow the steps in the README's [build from source section](README.md#build-from-source). After each rebuild, click the reload icon on the extension's card, then reload any open x.com tab.
+
+## Release a version
+
+The owner releases by hand with the **Release** workflow (`.github/workflows/release.yml`). On the repository's **Actions** tab, pick **Release**, click **Run workflow** on `main` and choose a bump:
+
+- **patch** for fixes, for example `0.1.0` to `0.1.1`
+- **minor** for new features, for example `0.1.0` to `0.2.0`
+- **major** for breaking changes, for example `0.1.0` to `1.0.0`
+
+The workflow type checks and tests the code, bumps the version in `package.json`, and builds the zip. It then pushes a `chore(release): v<version>` commit and a `v<version>` tag to `main`, and publishes a GitHub release with the zip attached. The release notes list the pull requests merged since the previous tag, by title, so write titles that read well in a changelog.
+
+If `main` moves while the workflow runs, for example because someone merged a pull request or another release finished first, the push fails and nothing is released. Start a new run with **Run workflow**: **Re-run jobs** on the failed run reuses its old commit and fails the same way.
 
 ## How the extension works
 

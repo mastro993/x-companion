@@ -34,12 +34,35 @@ To install x-companion, you need:
 - A Chromium browser, version 140 or newer: Chrome, Edge, or Opera 135.0.5973.123+
   - **Brave**: Brave's sidebar has no entry for extension panels, so open the panel from the toolbar icon instead
   - **Arc**: not supported, because its side panel API does nothing
-- Node.js 22.12+ and pnpm, to build from source
 - An API key from one of the supported providers
 
-## Install from source
+## Install
 
-x-companion isn't in the Chrome Web Store yet, so you build it and load it unpacked. These commands clone the repository and write a production build to `.output/chrome-mv3`:
+x-companion isn't in the Chrome Web Store yet, so you load it as an unpacked extension. Each [release](https://github.com/mastro993/x-companion/releases) has a ready-made build:
+
+1. Download `x-companion-<version>-chrome.zip` from the [latest release](https://github.com/mastro993/x-companion/releases/latest).
+2. Unzip it. You usually get a folder named `x-companion-<version>-chrome`, with `manifest.json` directly inside. Rename it to `x-companion` and move it to a place you'll keep, for example your home folder. The browser runs the extension from this folder and ties its settings to the folder's path, so don't move, rename or delete it later.
+3. Open the extensions page: `chrome://extensions` (Chrome), `edge://extensions` (Edge) or `brave://extensions` (Brave).
+4. Turn on **Developer mode**.
+5. Click **Load unpacked** and select the folder.
+6. Optionally, pin x-companion to the toolbar.
+
+Reload any x.com tab that was open before you installed. The x-companion controls appear only after a page reload, and the same applies after you update, reload or re-enable the extension.
+
+### Update
+
+The browser doesn't update unpacked extensions, so you update x-companion by hand. Your API keys, style guide and projects carry over:
+
+1. Download the zip from the [latest release](https://github.com/mastro993/x-companion/releases/latest).
+2. Unzip it, then swap the folders: delete your `x-companion` folder, rename the new folder to `x-companion` and move it to the same place. `manifest.json` must sit directly inside it, not in a subfolder.
+3. On the extensions page, click the reload icon on the x-companion card.
+4. Reload any open x.com tab.
+
+Don't remove the extension or load the new version from another folder: either way, the browser treats it as a new extension and your settings are lost.
+
+### Build from source
+
+To build x-companion yourself, you need Node.js 22.12+ and pnpm. These commands clone the repository and write a production build to `.output/chrome-mv3`:
 
 ```sh
 git clone https://github.com/mastro993/x-companion.git
@@ -48,14 +71,7 @@ pnpm install
 pnpm build
 ```
 
-Then load the build into your browser:
-
-1. Open the extensions page: `chrome://extensions` (Chrome), `edge://extensions` (Edge) or `brave://extensions` (Brave).
-2. Turn on **Developer mode**.
-3. Click **Load unpacked** and select `.output/chrome-mv3`.
-4. Optionally, pin x-companion to the toolbar.
-
-Reload any x.com tab that was open before you installed. The x-companion controls appear only after a page reload, and the same applies after you update, reload or re-enable the extension.
+Load `.output/chrome-mv3` as in steps 3 to 6 of [Install](#install). To update, run `git pull`, `pnpm install` and `pnpm build`, then reload the extension and any open x.com tab.
 
 ## Set up and generate a reply
 
