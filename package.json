@@ -2,7 +2,7 @@
   "name": "x-companion",
   "description": "AI reply drafts for X posts in your writing style.",
   "private": true,
-  "version": "0.1.1",
+  "version": "0.1.2",
   "type": "module",
   "engines": {
     "node": ">=22.12"
