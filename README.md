@@ -3,9 +3,10 @@
 > [!WARNING]
 > x-companion is in early development. Expect rough edges and bugs, and review every draft before you post it. Please [report problems](https://github.com/mastro993/x-companion/issues) you run into.
 
-x-companion is a Chromium extension that drafts replies on X (x.com) in your own writing style. It adds two controls to X's reply composer:
+x-companion is a Chromium extension that drafts replies on X (x.com) in your own writing style. It adds three controls to X's reply composer:
 
 - **Generate**, on an empty reply box: drafts a reply to the post.
+- **Regenerate**, an icon left of **Rewrite** once the box has text: drafts a fresh reply to the post from scratch and replaces the box's text with it.
 - **Rewrite**, once the box has text: a menu that reworks your draft. **Polish** fixes typos, grammar and awkward phrasing with the smallest edits. **Punchier** makes it clearer and catchier. **Match style** brings it closer to your style guide.
 
 The extension sends the post, your draft, your style guide and your projects to the AI provider you chose, then writes the result into the reply box. You edit it and post it yourself.
@@ -87,7 +88,7 @@ Setup takes one tab in the side panel, plus an optional style guide and project 
 
    Only the sections you fill in are sent with each request. Changes save automatically.
 4. Optionally, add what you build on the **Projects** tab, up to 10 projects. Each one has a name, a description of up to 300 characters and a link. A fresh reply mentions a project only when it fits the post, and only with the facts you wrote. Projects without a name aren't sent. **Remove** asks you to confirm inline.
-5. When the header shows **Ready**, open a reply: the reply dialog, or the inline reply box on a post's page. On an empty box, click **Generate**. Once the box has text, whether a draft or your own, click **Rewrite** and pick **Polish**, **Punchier** or **Match style**. Review and edit the result before you post.
+5. When the header shows **Ready**, open a reply: the reply dialog, or the inline reply box on a post's page. On an empty box, click **Generate**. Once the box has text, whether a draft or your own, click **Rewrite** and pick **Polish**, **Punchier** or **Match style**, or click the **Regenerate** icon for a fresh reply that replaces the text. Review and edit the result before you post.
 
 Until a provider and key are set, the controls are greyed out, and clicking them opens the side panel. If an action fails, for example from a bad key, a rate limit or a timeout, a short message appears next to the controls. If you edit the reply box while an action runs, the result is dropped so it can't overwrite your edit.
 
