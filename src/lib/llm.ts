@@ -25,6 +25,8 @@ const EMPTY = 'The model returned an empty reply. Try again or pick another mode
 interface ApiError {
   // xAI sends a bare string; everyone else sends { message }.
   error?: string | { message?: string };
+  // TypeSafe (Jev) sends { detail: { message } }, or a list of field errors on a 422.
+  detail?: { message?: string };
 }
 
 interface ChatResponse {
@@ -40,7 +42,8 @@ interface AnthropicResponse {
   content?: { type: string; text?: string }[];
 }
 
-function authHeaders(provider: ProviderId, apiKey: string): Record<string, string> {
+// TypeSafe (Jev, see jev.ts) takes a plain bearer key.
+function authHeaders(provider: ProviderId | 'typesafe', apiKey: string): Record<string, string> {
   if (provider === 'anthropic') {
     return {
       'x-api-key': apiKey,
@@ -68,7 +71,7 @@ function httpError(status: number, message: string): string {
 
 const isTimeout = (e: unknown) => e instanceof DOMException && e.name === 'TimeoutError';
 
-async function fetchJson<T>(
+export async function fetchJson<T>(
   url: string,
   init: RequestInit,
   timeoutMessage = 'The model took too long. Try a faster model.',
@@ -88,7 +91,8 @@ async function fetchJson<T>(
     // Non-JSON body (e.g. a proxy's HTML error page): fall back to the HTTP status.
   }
   const err = body?.error;
-  const message = typeof err === 'string' ? err : err && (err.message ?? 'Unknown error');
+  const message =
+    typeof err === 'string' ? err : err ? (err.message ?? 'Unknown error') : body?.detail?.message;
   if (!res.ok) {
     throw new Error(httpError(res.status, message || res.statusText || 'Request failed'));
   }
@@ -98,7 +102,7 @@ async function fetchJson<T>(
   return body;
 }
 
-function postJson(provider: ProviderId, apiKey: string, body: object): RequestInit {
+export function postJson(provider: ProviderId | 'typesafe', apiKey: string, body: object): RequestInit {
   return {
     method: 'POST',
     headers: { ...authHeaders(provider, apiKey), 'content-type': 'application/json' },
