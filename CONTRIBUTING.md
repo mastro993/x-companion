@@ -1,0 +1,196 @@
+# Contributing to x-companion
+
+This guide covers how to run x-companion locally, how the code is organized, the rules the code follows, and how to test a change before you open a pull request. For what the extension does and how to install it, see the [README](README.md).
+
+x-companion is in early development, so expect parts of the code and this guide to change.
+
+## Set up your environment
+
+You need Node.js 22.12+, pnpm and a Chromium browser, version 140 or newer. Install dependencies once:
+
+```sh
+pnpm install
+```
+
+The install also runs `wxt prepare`, which generates the TypeScript config in `.wxt/`.
+
+## Run a development build
+
+This command builds into `.output/chrome-mv3-dev`, starts a dev server on `localhost:3000` and opens Chrome at x.com/home with the extension loaded:
+
+```sh
+pnpm dev
+```
+
+How the dev session behaves:
+
+- **Persistent profile**: the Chrome window uses its own profile in `.wxt/chrome-data`. Log in to X there once, and later runs keep the login.
+- **Rebuilds**: saving a file rebuilds automatically. The side panel hot-reloads. Background and content-script changes reload the extension; if the button doesn't come back, reload the x.com tab.
+- **One session per checkout**: a second `pnpm dev` takes the next port and overwrites `.output/chrome-mv3-dev`, which breaks the first session.
+- **Extra permissions**: WXT adds the `tabs` and `scripting` permissions to dev builds so it can reload the extension. Check anything permission-related with a production build.
+
+### Use another browser or profile
+
+Personal overrides go in a `web-ext.config.ts` at the repo root. The file is gitignored, so it affects only your checkout.
+
+To open Brave (or another Chromium browser) instead of Chrome, point the `chrome` binary at it. Give it its own profile, because Chromium refuses a profile that a newer browser version created:
+
+```ts
+// web-ext.config.ts
+import { resolve } from 'node:path';
+import { defineWebExtConfig } from 'wxt';
+
+export default defineWebExtConfig({
+  binaries: {
+    chrome: '/Applications/Brave Browser.app/Contents/MacOS/Brave Browser',
+  },
+  chromiumProfile: resolve('.wxt/brave-data'),
+});
+```
+
+To use your everyday browser profile instead, set `disabled: true` in that file. Then load `.output/chrome-mv3-dev` unpacked while `pnpm dev` runs.
+
+## Build for production
+
+`pnpm build` writes the extension to `.output/chrome-mv3`, and `pnpm zip` packages it for the Chrome Web Store:
+
+```sh
+pnpm build   # .output/chrome-mv3
+pnpm zip     # .output/x-companion-<version>-chrome.zip
+```
+
+To load the build, follow the steps in the README's [install section](README.md#install-from-source). After each rebuild, click the reload icon on the extension's card, then reload any open x.com tab.
+
+## How the extension works
+
+x-companion has three parts that talk through extension messages, plus the provider adapters the background uses.
+
+- **Background service worker** (`src/entrypoints/background.ts`):
+  - Enables the side panel and toolbar icon per tab, on x.com only. The manifest has no global `side_panel` entry, so the panel never follows you to other sites.
+  - Answers the content script: it reports the ready status, opens the side panel and generates replies.
+  - Calls the provider API directly, with a 60s timeout. A keepalive holds the service worker open during long calls.
+  - Pushes ready-status changes to open x.com tabs.
+- **Content script** (`src/entrypoints/x.content/`, logic in `src/lib/x-dom.ts`):
+  - Watches the page for reply composers: the reply dialog, the inline composer on a post page and the narrow-layout `/compose/post` page.
+  - Inserts the button before X's **Reply** button. New-post, quote and home composers get no button.
+  - Reads the target post: the author, the text with emoji, any quoted post, image alt text and whether **Show more** cut it off.
+  - Fills the Draft.js editor with a synthetic paste, then checks the result.
+- **Side panel** (`src/entrypoints/sidepanel/`, `src/components/sidepanel/`):
+  - Built with React 19, shadcn/ui (Base UI) and Tailwind v4, in X's colour palette.
+  - Follows the system light or dark theme.
+  - Keeps all state in extension storage.
+- **Large language model (LLM) adapters** (`src/lib/llm.ts`, `src/lib/prompt.ts`):
+  - Two request paths: Chat Completions (OpenAI, xAI, OpenRouter) and Anthropic Messages.
+  - Request low reasoning effort when the model supports it.
+  - The prompt caps replies at 280 characters.
+
+## Project structure
+
+The source tree groups code by extension entrypoint, with shared logic in `src/lib/`:
+
+```text
+src/
+  entrypoints/
+    background.ts          service worker: panel per tab, messaging, LLM calls
+    x.content/             content script + button CSS for x.com
+    sidepanel/             side panel page (index.html, main.tsx, App.tsx)
+  components/
+    sidepanel/             panel UI: status header, provider/key/model, style
+    ui/                    shadcn/ui components
+  hooks/                   useSettings (storage-backed), useModels
+  lib/
+    providers.ts           provider ids, labels, default models
+    settings.ts            settings storage item + getStatus
+    messages.ts            content <-> background message types
+    llm.ts, prompt.ts      provider HTTP adapters, reply prompt
+    background-utils.ts    URL check + untrusted message validation
+    x-dom.ts               every X selector and DOM routine
+  assets/tailwind.css      theme tokens (side panel only)
+public/icon/               toolbar and store icons
+wxt.config.ts              manifest (permissions, hosts, minimum Chrome)
+```
+
+## Code guidelines
+
+These rules keep the extension small and private, and they limit the work when X changes its page:
+
+- **Keep X selectors in one file**: every X selector and DOM routine lives in `src/lib/x-dom.ts`. When X changes its markup, that file is the only one to update.
+- **Keep the content script away from storage**: the content script runs on x.com and must never import settings or storage code. It asks the background for anything it needs.
+- **Treat messages as untrusted**: validate every message that reaches the background in `src/lib/background-utils.ts`, and cap the length of any new field.
+- **Call providers over plain HTTP**: the adapters use `fetch`, with no provider SDKs. To add a provider, extend `src/lib/providers.ts`, the matching request path in `src/lib/llm.ts` and the host list in `wxt.config.ts`.
+- **Reuse shadcn/ui components**: build side panel UI from the components in `src/components/ui/`. Add missing ones with the shadcn CLI rather than writing your own.
+- **Don't add permissions lightly**: every permission and host in `wxt.config.ts` shows up in the install prompt. Explain any new one in your pull request.
+- **Update the docs with the code**: if a change affects behaviour described in the README or this guide, update that text in the same pull request.
+
+## Test your change
+
+Unit tests cover the logic, but they never call a real provider or load the real x.com. Run the automated checks, then test by hand on x.com.
+
+### Run the automated checks
+
+Run `pnpm compile`, `pnpm test` and `pnpm build` before every commit:
+
+```sh
+pnpm test                                # all unit tests, once
+pnpm vitest                              # watch mode
+pnpm vitest run src/lib/x-dom.test.ts    # a single file
+pnpm compile                             # TypeScript type check
+pnpm build                               # catches bundling and manifest errors
+```
+
+The unit tests use Vitest, and the DOM tests run in happy-dom. They cover:
+
+- provider request and response handling, with `fetch` stubbed
+- the prompt builder and message validation
+- settings status
+- the side panel's key field and model reload
+- the X DOM logic, against hand-written fixtures
+
+When you fix a bug, add a test that fails without the fix if the code can be tested in happy-dom.
+
+### Test by hand on x.com
+
+You need an X account and an API key for at least one provider. Use `pnpm dev`, or load a production build. Then check each area:
+
+1. **x.com only**: on an x.com tab, click the toolbar icon, and the side panel opens. Switch to any other site, and the panel hides while the icon greys out. Switch back, and both return.
+2. **Setup**:
+   - On the **Provider** tab, choose a provider and paste your key. The panel shows “Key verified · N models”.
+   - Paste a wrong key. The panel shows “Invalid API key”.
+   - Pick a model.
+   - On the **Style** tab, write a style. The header changes to **Ready**.
+3. **Button placement**:
+   - **Generate** appears left of **Reply** in the reply dialog (the reply icon under a timeline post) and in the inline reply box on a post's own page.
+   - It doesn't appear in the home “What's happening?” box, the new-post dialog or the quote dialog.
+4. **Not ready**:
+   - Clear the style. The button turns grey.
+   - Click it. The side panel opens.
+   - Restore the style. The button becomes active without a page reload.
+5. **Generate**:
+   - Click **Generate**. It shows “Generating…”, then the draft appears in the reply box.
+   - Confirm that X's **Reply** button is enabled, that you can edit the text, and that nothing was posted.
+   - Generate again on a box that already has text. The new draft replaces the text instead of appending to it, and multi-line drafts keep their line breaks.
+6. **Errors**: use a bad key, or go offline, and generate. A short message appears next to the button for about 6s.
+7. **Each provider**: for every provider you have a key for, switch the active provider and generate once.
+8. **Narrow window**: shrink the window until X switches to its narrow layout, where replies open as a `/compose/post` page. The button still appears and fills the box.
+9. **Themes**: under X's Default and Lights out themes, the button stays readable. After you switch theme, reopen the composer.
+
+## Debug the extension
+
+Each part of the extension has its own DevTools console:
+
+- **Service worker** (provider calls, messaging): on the extensions page, click the **service worker** link on the x-companion card.
+- **Side panel**: right-click inside the panel and choose **Inspect**.
+- **Content script**: open DevTools on the x.com tab and pick **x-companion** in the Console's context dropdown.
+- **Stored settings**: run `await chrome.storage.local.get()` in the service worker console.
+
+> [!CAUTION]
+> The stored settings output includes your API keys. Don't paste it into issues, pull requests or chats.
+
+## Open a pull request
+
+Branch from `main` and keep each pull request to one change:
+
+- **Commit messages** follow [Conventional Commits](https://www.conventionalcommits.org/), for example `feat: add Gemini provider` or `fix: detect the inline reply box`.
+- **Checks**: `pnpm compile`, `pnpm test` and `pnpm build` pass, and you ran the manual tests that your change touches.
+- **Description**: say what changed, why, and how you tested it. For side panel or button changes, add before and after screenshots with no API keys or personal data in them.
+- **Review**: automated Claude reviews run on the owner's pull requests. Other pull requests get one only after the owner adds the `claude-review` label.
