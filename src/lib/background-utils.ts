@@ -1,6 +1,5 @@
-import type { BackgroundRequest, TargetPost } from './messages';
+import { ACTIONS, type ActionId, type BackgroundRequest, MAX_TEXT, type TargetPost } from './messages';
 
-const MAX_TEXT = 8000;
 const MAX_AUTHOR = 100;
 const MAX_IMAGES = 4;
 const MAX_ALT = 500;
@@ -11,6 +10,7 @@ export function isXUrl(url: string | undefined): boolean {
 }
 
 const isString = (v: unknown): v is string => typeof v === 'string';
+const isAction = (v: unknown): v is ActionId => ACTIONS.includes(v as ActionId);
 
 function parsePost(v: unknown): TargetPost | null {
   if (typeof v !== 'object' || v === null) return null;
@@ -37,9 +37,12 @@ function parsePost(v: unknown): TargetPost | null {
 /** Content-script messages are untrusted: rebuild a known shape with capped lengths, or null. */
 export function parseRequest(msg: unknown): BackgroundRequest | null {
   if (typeof msg !== 'object' || msg === null) return null;
-  const { type, post } = msg as Record<string, unknown>;
+  const { type, action, post, draft } = msg as Record<string, unknown>;
   if (type === 'get-status' || type === 'open-side-panel') return { type };
-  if (type !== 'generate-reply') return null;
+  // A cut draft would come back rewritten without its tail, so an over-long one is refused, not capped.
+  if (type !== 'run-action' || !isAction(action) || !isString(draft) || draft.length > MAX_TEXT) {
+    return null;
+  }
   const parsed = parsePost(post);
-  return parsed && { type, post: parsed };
+  return parsed && { type, action, post: parsed, draft };
 }

@@ -26,7 +26,7 @@ How the dev session behaves:
 
 - **Persistent profile**: the Chrome window uses its own profile in `.wxt/chrome-data`. Log in to X there once, and later runs keep the login.
 - **Fixed extension ID**: dev builds carry a manifest `key`, so their extension ID is always `mogjdmpkbfcfdgedklmkjoploiamddcf`, wherever the checkout lives. Production builds have no key.
-- **Rebuilds**: saving a file rebuilds automatically. The side panel hot-reloads. Background and content-script changes reload the extension; if the button doesn't come back, reload the x.com tab.
+- **Rebuilds**: saving a file rebuilds automatically. The side panel hot-reloads. Background and content-script changes reload the extension; if the controls don't come back, reload the x.com tab.
 - **One session per checkout**: a second `pnpm dev` takes the next port and overwrites `.output/chrome-mv3-dev`, which breaks the first session.
 - **Extra permissions**: WXT adds the `tabs` and `scripting` permissions to dev builds so it can reload the extension. Check anything permission-related with a production build.
 
@@ -78,22 +78,27 @@ x-companion has three parts that talk through extension messages, plus the provi
 
 - **Background service worker** (`src/entrypoints/background.ts`):
   - Enables the side panel and toolbar icon per tab, on x.com only. The manifest has no global `side_panel` entry, so the panel never follows you to other sites.
-  - Answers the content script: it reports the ready status, opens the side panel and generates replies.
+  - Answers the content script: it reports the ready status, opens the side panel and runs actions (generate or rewrite a reply).
   - Calls the provider API directly, with a 60s timeout. A keepalive holds the service worker open during long calls.
   - Pushes ready-status changes to open x.com tabs.
 - **Content script** (`src/entrypoints/x.content/`, logic in `src/lib/x-dom.ts`):
   - Watches the page for reply composers: the reply dialog, the inline composer on a post page and the narrow-layout `/compose/post` page.
-  - Inserts the button before X's **Reply** button. New-post, quote and home composers get no button.
+  - Inserts the controls before X's **Reply** button: **Generate** on an empty box, **Rewrite** with its menu once the box has text. New-post, quote and home composers get no controls.
+  - The Rewrite menu is a native popover with CSS anchor positioning, so it sits in the top layer and X's overflow can't clip it.
   - Reads the target post: the author, the text with emoji, any quoted post, image alt text and whether **Show more** cut it off.
-  - Fills the Draft.js editor with a synthetic paste, then checks the result.
+  - Fills the Draft.js editor with a synthetic paste, then checks the result. A result is dropped if the box changed while the action ran.
 - **Side panel** (`src/entrypoints/sidepanel/`, `src/components/sidepanel/`):
   - Built with React 19, shadcn/ui (Base UI) and Tailwind v4, in X's colour palette.
   - Follows the system light or dark theme.
   - Keeps all state in extension storage.
-- **Large language model (LLM) adapters** (`src/lib/llm.ts`, `src/lib/prompt.ts`):
+- **Large language model (LLM) adapters** (`src/lib/llm.ts`):
   - Two request paths: Chat Completions (OpenAI, xAI, OpenRouter) and Anthropic Messages.
   - Request low reasoning effort when the model supports it.
-  - The prompt caps replies at 280 characters.
+- **Prompts** (`src/lib/prompts/`):
+  - One file per action. Each exports a `PromptBuilder`: a function from `PromptConfig` (the context, meaning the post and the reply box text, plus the style guide and projects) to a system and user message.
+  - `PROMPTS` in `index.ts` maps each action in `ACTIONS` (`src/lib/messages.ts`) to its prompt. To add an action, add its ID there, write its prompt file and register it, then give it a label in `src/lib/x-dom.ts`.
+  - The rewrite actions share `rewrite.ts`, so each of their files holds only its instruction. The shared blocks (style guide, projects, the post and its context, delimiter stripping) live in `shared.ts`.
+  - A fresh reply is capped at 280 characters. A rewrite keeps that cap, or the draft's length if it's longer.
 
 ## Project structure
 
@@ -106,14 +111,15 @@ src/
     x.content/             content script + button CSS for x.com
     sidepanel/             side panel page (index.html, main.tsx, App.tsx)
   components/
-    sidepanel/             panel UI: status header, provider/key/model, style
+    sidepanel/             panel UI: status header, provider/key/model, style, projects
     ui/                    shadcn/ui components
-  hooks/                   useSettings (storage-backed), useModels
+  hooks/                   useSettings (storage-backed), useModels, useAutosave
   lib/
     providers.ts           provider ids, labels, default models
     settings.ts            settings storage item + getStatus
     messages.ts            content <-> background message types
-    llm.ts, prompt.ts      provider HTTP adapters, reply prompt
+    llm.ts                 provider HTTP adapters
+    prompts/               one prompt per action, shared prompt blocks
     background-utils.ts    URL check + untrusted message validation
     x-dom.ts               every X selector and DOM routine
   assets/tailwind.css      theme tokens (side panel only)
@@ -152,9 +158,9 @@ pnpm build                               # catches bundling and manifest errors
 The unit tests use Vitest, and the DOM tests run in happy-dom. They cover:
 
 - provider request and response handling, with `fetch` stubbed
-- the prompt builder and message validation
+- the prompts and message validation
 - settings status and the stored-settings migration
-- the side panel's key field, model reload and style guide saving
+- the side panel's key field, model reload, style guide saving and project list
 - the X DOM logic, against hand-written fixtures
 
 When you fix a bug, add a test that fails without the fix if the code can be tested in happy-dom.
@@ -169,21 +175,27 @@ You need an X account and an API key for at least one provider. Use `pnpm dev`, 
    - Paste a wrong key. The panel shows “Invalid API key”.
    - Pick a model.
    - On the **Style** tab, fill in each section. Each one shows **Saved** shortly after you stop typing. Switch to **Provider** and back: each section kept its text.
-3. **Button placement**:
+   - On the **Projects** tab, add a project. Its **Name** field gets focus. Fill in the fields: the card shows **Saved** shortly after you stop typing. Switch tabs and back: the project kept its text. **Remove** asks to confirm, and **Cancel** keeps it. **Add project** turns off at 10 projects.
+3. **Placement**:
    - **Generate** appears left of **Reply** in the reply dialog (the reply icon under a timeline post) and in the inline reply box on a post's own page.
-   - It doesn't appear in the home “What's happening?” box, the new-post dialog or the quote dialog.
+   - Type a character: **Generate** becomes **Rewrite**. Delete it: **Generate** comes back.
+   - No controls appear in the home “What's happening?” box, the new-post dialog or the quote dialog.
 4. **Not ready**:
-   - Clear the active provider's API key. The button turns grey.
-   - Click it. The side panel opens.
-   - Paste the key again. The button becomes active without a page reload.
+   - Clear the active provider's API key. The controls turn grey.
+   - Click **Generate**, then type something and click **Rewrite**. Each opens the side panel, and no menu opens.
+   - Paste the key again. The controls become active without a page reload.
 5. **Generate**:
-   - Click **Generate**. It shows “Generating…”, then the draft appears in the reply box.
+   - Click **Generate**. It shows “Generating…”, then the draft appears in the reply box and the control becomes **Rewrite**.
    - Confirm that X's **Reply** button is enabled, that you can edit the text, and that nothing was posted.
-   - Generate again on a box that already has text. The new draft replaces the text instead of appending to it, and multi-line drafts keep their line breaks.
-6. **Errors**: use a bad key, or go offline, and generate. A short message appears next to the button for about 6s.
-7. **Each provider**: for every provider you have a key for, switch the active provider and generate once.
-8. **Narrow window**: shrink the window until X switches to its narrow layout, where replies open as a `/compose/post` page. The button still appears and fills the box.
-9. **Themes**: under X's Default and Lights out themes, the button stays readable. After you switch theme, reopen the composer.
+   - Type into the box while it shows “Generating…”. The result is dropped with a message, and your text stays.
+6. **Rewrite**:
+   - Click **Rewrite**. A menu with **Polish**, **Punchier** and **Match style** opens under it, or above it when there's no room below. Clicking outside it or pressing Escape closes it.
+   - Pick each action on a multi-line draft. The pill shows its progress (“Polishing…”, “Rewriting…”), then the rewrite replaces the draft and keeps its line breaks.
+   - **Polish** on a draft that needs no fixes leaves the box as it was.
+7. **Errors**: use a bad key, or go offline, and run an action. A short message appears next to the controls for about 6s.
+8. **Each provider**: for every provider you have a key for, switch the active provider and generate once.
+9. **Narrow window**: shrink the window until X switches to its narrow layout, where replies open as a `/compose/post` page. The controls still appear, switch between Generate and Rewrite as you type, and fill the box.
+10. **Themes**: under X's Default and Lights out themes, the controls and the Rewrite menu stay readable. After you switch theme, reopen the composer.
 
 ## Debug the extension
 
@@ -203,5 +215,5 @@ Branch from `main` and keep each pull request to one change:
 
 - **Commit messages** follow [Conventional Commits](https://www.conventionalcommits.org/), for example `feat: add Gemini provider` or `fix: detect the inline reply box`.
 - **Checks**: `pnpm compile`, `pnpm test` and `pnpm build` pass, and you ran the manual tests that your change touches.
-- **Description**: say what changed, why, and how you tested it. For side panel or button changes, add before and after screenshots with no API keys or personal data in them.
+- **Description**: say what changed, why, and how you tested it. For side panel or composer control changes, add before and after screenshots with no API keys or personal data in them.
 - **Review**: automated Claude reviews run on the owner's pull requests. Other pull requests get one only after the owner adds the `claude-review` label.

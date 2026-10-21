@@ -1,5 +1,5 @@
 // Every X-coupled selector and DOM trick lives here, so X markup changes are fixed in one file.
-import type { TargetPost } from './messages';
+import { ACTIONS, type ActionId, type TargetPost } from './messages';
 
 // Draft.js contenteditable (thread parts are _1.._n), plus the narrow-layout textarea.
 const EDITOR =
@@ -20,7 +20,18 @@ interface Composer {
 interface ReplyComposer extends Composer {
   submit: HTMLElement;
 }
-type ButtonState = 'ready' | 'setup' | 'busy';
+export interface ControlsState {
+  ready: boolean; // setup done
+  busy: ActionId | null; // running in this composer
+  hasText: boolean; // the reply box has text: offer rewrites instead of a fresh reply
+}
+
+const LABELS: Record<ActionId, { label: string; busy: string }> = {
+  reply: { label: 'Generate', busy: 'Generating…' },
+  polish: { label: 'Polish', busy: 'Polishing…' },
+  punchier: { label: 'Punchier', busy: 'Rewriting…' },
+  'match-style': { label: 'Match style', busy: 'Rewriting…' },
+};
 
 // Anchored: /photo/1, /video/1, /analytics are modals over the page below (e.g. the home composer).
 const statusId = () => location.pathname.match(/^\/(?:i\/web|[^/]+)\/status\/(\d+)\/?$/)?.[1];
@@ -89,41 +100,67 @@ export function composerOf(btn: Element): Composer | null {
   return root && editor ? { root, editor } : null;
 }
 
-function sparkleIcon(): SVGSVGElement {
+function icon(d: string): SVGSVGElement {
   const svg = document.createElementNS(SVG_NS, 'svg');
   svg.setAttribute('viewBox', '0 0 24 24');
   svg.setAttribute('aria-hidden', 'true');
   const path = document.createElementNS(SVG_NS, 'path');
-  path.setAttribute('d', 'M12 2l2.4 7.6L22 12l-7.6 2.4L12 22l-2.4-7.6L2 12l7.6-2.4z');
+  path.setAttribute('d', d);
   svg.append(path);
   return svg;
 }
+const SPARKLE = 'M12 2l2.4 7.6L22 12l-7.6 2.4L12 22l-2.4-7.6L2 12l7.6-2.4z';
+const CHEVRON = 'M7.4 8.6L12 13.2l4.6-4.6L18 10l-6 6-6-6z';
 
-/** Inserts our button before X's Reply button. Idempotent: returns null if already there. */
-export function injectButton(
+/**
+ * Inserts our controls before X's Reply button: a Generate pill, and a Rewrite pill whose menu
+ * holds the other actions. `onClick` gets the clicked control and its action; null means the
+ * Rewrite pill was clicked while its menu is off (setup unfinished or busy).
+ * Idempotent: returns null if already there.
+ */
+export function injectControls(
   c: ReplyComposer,
-  onClick: (btn: HTMLButtonElement) => void,
-): HTMLButtonElement | null {
+  onClick: (el: HTMLElement, action: ActionId | null) => void,
+): HTMLElement | null {
   const host = c.submit.parentElement!;
   if (host.querySelector(`[${MARK}]`) || host.closest(INSIDE_EDITOR)) return null;
 
   const wrap = document.createElement('span');
   wrap.className = 'xc-reply';
   wrap.setAttribute(MARK, '');
-  const btn = document.createElement('button');
-  btn.type = 'button';
-  btn.className = 'xc-reply-btn';
-  // ponytail: copied once, so a live theme switch leaves it stale until X re-mounts the composer
-  btn.style.color = getComputedStyle(c.editor).color; // X's theme text colour, no theme sniffing
-  btn.append(sparkleIcon(), document.createElement('span'));
-  btn.addEventListener('mousedown', (e) => e.preventDefault()); // keep the caret in the editor
-  btn.addEventListener('click', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    // Page scripts and other extensions could otherwise spend the user's key; keyboard and AT clicks are trusted.
-    if (e.isTrusted) onClick(btn);
-  });
-  wrap.append(btn);
+  // ponytail: copied once, so a live theme switch leaves them stale until X re-mounts the composer
+  wrap.style.color = getComputedStyle(c.editor).color; // X's theme text colour, no theme sniffing
+  const page = getComputedStyle(document.body).backgroundColor; // X paints its theme on body
+
+  const button = (className: string, action: ActionId | null, ...content: Node[]) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = className;
+    btn.append(...content);
+    btn.addEventListener('mousedown', (e) => e.preventDefault()); // keep the caret in the editor
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      // An armed Rewrite pill opens its menu natively (popovertarget).
+      if (btn.popoverTargetElement) return;
+      e.preventDefault();
+      // Page scripts and other extensions could otherwise spend the user's key; keyboard and AT clicks are trusted.
+      if (e.isTrusted) onClick(btn, action);
+    });
+    return btn;
+  };
+
+  const menu = document.createElement('div');
+  menu.className = 'xc-menu';
+  menu.popover = 'auto';
+  if (page !== 'rgba(0, 0, 0, 0)') menu.style.backgroundColor = page;
+  for (const action of ACTIONS.filter((a) => a !== 'reply')) {
+    const item = button('xc-menu-item', action, document.createTextNode(LABELS[action].label));
+    item.addEventListener('click', () => menu.hidePopover());
+    menu.append(item);
+  }
+  const generate = button('xc-reply-btn', 'reply', icon(SPARKLE), document.createElement('span'));
+  const rewrite = button('xc-reply-btn', null, icon(SPARKLE), document.createElement('span'), icon(CHEVRON));
+  wrap.append(generate, rewrite, menu);
 
   // ponytail: forces a row on react-native-web column hosts (compact detail composer); revisit if X's layout shifts
   if (getComputedStyle(host).flexDirection.startsWith('column')) {
@@ -131,32 +168,60 @@ export function injectButton(
     host.style.alignItems = 'center';
   }
   host.insertBefore(wrap, c.submit);
-  return btn;
+  return wrap;
 }
 
-export function updateButton(btn: HTMLButtonElement, state: ButtonState): void {
+/**
+ * Shows Generate on an empty box and Rewrite on a filled one. Rewrites the label only when it
+ * changed: a text write is a childList mutation, which would queue another scan.
+ */
+export function renderControls(wrap: Element, { ready, busy, hasText }: ControlsState): void {
+  const [generate, rewrite] = wrap.querySelectorAll<HTMLButtonElement>(':scope > .xc-reply-btn');
+  const menu = wrap.querySelector<HTMLElement>('.xc-menu');
+  if (!generate || !rewrite || !menu) return;
+  const rewriting = busy ? busy !== 'reply' : hasText;
+  const btn = rewriting ? rewrite : generate;
+  generate.hidden = rewriting;
+  rewrite.hidden = !rewriting;
+
+  const label = busy ? LABELS[busy].busy : rewriting ? 'Rewrite' : LABELS.reply.label;
+  const span = btn.querySelector('span')!;
+  if (span.textContent !== label) span.textContent = label; // a text write is a childList mutation
   const attr = (name: string, value: string | false) =>
     value === false ? btn.removeAttribute(name) : btn.setAttribute(name, value);
-  const busy = state === 'busy';
-  btn.lastElementChild!.textContent = busy ? 'Generating…' : 'Generate';
-  attr('aria-label', busy ? 'Generating reply with x-companion' : 'Generate reply with x-companion');
-  attr('aria-busy', busy && 'true');
+  const verb = busy ? (rewriting ? 'Rewriting draft' : 'Generating reply') : rewriting ? 'Rewrite draft' : 'Generate reply';
+  attr('aria-label', `${verb} with x-companion`);
+  attr('aria-busy', !!busy && 'true');
   // aria-disabled rather than `disabled`: a setup click must still fire to open the side panel.
-  attr('aria-disabled', state === 'setup' && 'true');
-  attr('title', state === 'setup' && 'x-companion: finish setup in the side panel');
+  attr('aria-disabled', !ready && 'true');
+  attr('title', !ready && 'x-companion: finish setup in the side panel');
+
+  // The invoker is also the menu's implicit anchor and is exempt from its light dismiss.
+  const armed = ready && !busy && rewriting;
+  if (!armed) menu.hidePopover(); // a no-op when closed
+  rewrite.popoverTargetElement = armed ? menu : null;
 }
 
-export function injectedButtons(): HTMLButtonElement[] {
-  return [...document.querySelectorAll<HTMLButtonElement>(`[${MARK}] > .xc-reply-btn`)];
+/** Closes an open Rewrite menu; false if none was open. */
+export function closeMenu(): boolean {
+  const open = document.querySelector<HTMLElement>('.xc-menu:popover-open');
+  open?.hidePopover();
+  return !!open;
 }
+
+export function injectedControls(): HTMLElement[] {
+  return [...document.querySelectorAll<HTMLElement>(`[${MARK}]`)];
+}
+
+/** Our controls wrapper around `el` (a pill or a menu item). */
+export const controlsOf = (el: Element) => el.closest<HTMLElement>(`[${MARK}]`);
 
 export function removeInjected(): void {
   for (const n of document.querySelectorAll(`[${MARK}]`)) n.remove();
 }
 
-/** Short message bubble next to the button; replaces any previous one, clears itself after ~6 s. */
-export function showAlert(btn: HTMLButtonElement, message: string): void {
-  const wrap = btn.parentElement!;
+/** Short message bubble over the controls; replaces any previous one, clears itself after ~6 s. */
+export function showAlert(wrap: HTMLElement, message: string): void {
   wrap.querySelector('.xc-reply-alert')?.remove();
   const alert = document.createElement('span');
   alert.className = 'xc-reply-alert';
@@ -208,7 +273,7 @@ export function getTargetPost(c: Composer): TargetPost | null {
 }
 
 /** Draft model text: one line per block (innerText doubles blank lines). */
-function readEditor(ed: HTMLElement): string {
+export function readEditor(ed: HTMLElement): string {
   if (ed instanceof HTMLTextAreaElement) return ed.value;
   const blocks = ed.querySelectorAll('[data-block="true"]');
   return blocks.length ? [...blocks].map((b) => b.textContent ?? '').join('\n') : ed.innerText;

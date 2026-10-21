@@ -3,7 +3,12 @@
 > [!WARNING]
 > x-companion is in early development. Expect rough edges and bugs, and review every draft before you post it. Please [report problems](https://github.com/mastro993/x-companion/issues) you run into.
 
-x-companion is a Chromium extension that drafts replies on X (x.com) in your own writing style. It adds a **Generate** button to X's reply composer. When you click it, the extension sends the post and your style guide to the AI provider you chose, then writes the draft into the reply box. You edit it and post it yourself.
+x-companion is a Chromium extension that drafts replies on X (x.com) in your own writing style. It adds two controls to X's reply composer:
+
+- **Generate**, on an empty reply box: drafts a reply to the post.
+- **Rewrite**, once the box has text: a menu that reworks your draft. **Polish** fixes typos, grammar and awkward phrasing with the smallest edits. **Punchier** makes it clearer and catchier. **Match style** brings it closer to your style guide.
+
+The extension sends the post, your draft, your style guide and your projects to the AI provider you chose, then writes the result into the reply box. You edit it and post it yourself.
 
 You bring your own API key from one of these providers:
 
@@ -17,10 +22,10 @@ You bring your own API key from one of these providers:
 x-companion has no backend. It talks only to x.com and the provider you pick:
 
 - **Your keys stay in your browser**: API keys and settings live in `chrome.storage.local`, restricted to trusted extension contexts (`setAccessLevel('TRUSTED_CONTEXTS')`). Only the background service worker and the side panel can read them; the content script on x.com can't. Keys aren't synced across devices, and like all extension storage, they're stored unencrypted in your browser profile.
-- **Post text goes only to your provider**: when you click **Generate**, the extension sends the post's author handle, its text, any quoted post and image alt text to the provider you selected. There's no analytics or telemetry. OpenAI requests are sent with `store: false`.
+- **Post text goes only to your provider**: when you run an action, the extension sends the post's author handle, its text, any quoted post and image alt text to the provider you selected, along with your style guide, your projects and, for a rewrite, the text in the reply box. There's no analytics or telemetry. OpenAI requests are sent with `store: false`.
 - **It never posts**: the extension only replaces the text in the reply box. Nothing reaches X until you click **Reply**.
 - **Minimal permissions**: `storage` and `sidePanel`, plus host access to x.com and the four provider APIs. It doesn't request the `tabs` permission.
-- **The page can't drive it**: the content script acts only on real (trusted) user clicks. The background checks that each message comes from an x.com tab, validates its shape and caps field lengths. The prompt wraps post text in delimiters and tells the model to treat it as material, not instructions.
+- **The page can't drive it**: the content script acts only on real (trusted) user clicks. The background checks that each message comes from an x.com tab, validates its shape and caps field lengths. The prompt wraps post text and your draft in delimiters and tells the model to treat them as material, not instructions.
 
 ## Requirements
 
@@ -50,11 +55,11 @@ Then load the build into your browser:
 3. Click **Load unpacked** and select `.output/chrome-mv3`.
 4. Optionally, pin x-companion to the toolbar.
 
-Reload any x.com tab that was open before you installed. The **Generate** button appears only after a page reload, and the same applies after you update, reload or re-enable the extension.
+Reload any x.com tab that was open before you installed. The x-companion controls appear only after a page reload, and the same applies after you update, reload or re-enable the extension.
 
 ## Set up and generate a reply
 
-Setup takes one tab in the side panel, plus an optional style guide. Once a provider and key are set, the button is ready on every reply box:
+Setup takes one tab in the side panel, plus an optional style guide and project list. Once a provider and key are set, the controls are ready on every reply box:
 
 1. Open x.com and click the x-companion toolbar icon. The side panel opens; it's available only on x.com tabs.
 2. On the **Provider** tab, choose a provider and paste your API key. The key is saved when you paste it, press Enter or leave the field. The panel then verifies the key by loading the provider's model list. Each provider starts with a default model, which you can change.
@@ -65,9 +70,10 @@ Setup takes one tab in the side panel, plus an optional style guide. Once a prov
    - **Rules**: dos and don'ts the AI must always respect, such as "no hashtags" or "always reply in English".
 
    Only the sections you fill in are sent with each request. Changes save automatically.
-4. When the header shows **Ready**, open a reply: the reply dialog, or the inline reply box on a post's page. Click **Generate**, then review and edit the draft before you post.
+4. Optionally, add what you build on the **Projects** tab, up to 10 projects. Each one has a name, a description of up to 300 characters and a link. A fresh reply mentions a project only when it fits the post, and only with the facts you wrote. Projects without a name aren't sent. **Remove** asks you to confirm inline.
+5. When the header shows **Ready**, open a reply: the reply dialog, or the inline reply box on a post's page. On an empty box, click **Generate**. Once the box has text, whether a draft or your own, click **Rewrite** and pick **Polish**, **Punchier** or **Match style**. Review and edit the result before you post.
 
-Until a provider and key are set, the button is greyed out, and clicking it opens the side panel. If generation fails, for example from a bad key, a rate limit or a timeout, a short message appears next to the button.
+Until a provider and key are set, the controls are greyed out, and clicking them opens the side panel. If an action fails, for example from a bad key, a rate limit or a timeout, a short message appears next to the controls. If you edit the reply box while an action runs, the result is dropped so it can't overwrite your edit.
 
 To keep keys for other providers without switching the active one, save them under **Other saved keys**. **Remove** asks you to confirm inline before it deletes a key.
 
@@ -76,9 +82,9 @@ To keep keys for other providers without switching the active one, save them und
 These gaps are known and not yet fixed:
 
 - **Long posts**: only the visible part of a long post (before **Show more**) is sent. The prompt tells the model the post is truncated.
-- **X markup changes**: X can change its page structure at any time, which can stop the button from appearing or from filling the box. If the extension can't verify the filled text, the button shows an error. Check the reply box, because X may have accepted part of the draft.
-- **Composers without a button**: in a multi-post reply thread, only the first box gets a button. Inline reply boxes under individual comments get none.
-- **Theme switches**: the button copies X's text colour when it's inserted. After you switch X's theme, close and reopen the composer to update it.
+- **X markup changes**: X can change its page structure at any time, which can stop the controls from appearing or from filling the box. If the extension can't verify the filled text, the controls show an error. Check the reply box, because X may have accepted part of the draft.
+- **Composers without controls**: in a multi-post reply thread, only the first box gets controls. Inline reply boxes under individual comments, new posts and quotes get none.
+- **Theme switches**: the controls copy X's text colour when they're inserted. After you switch X's theme, close and reopen the composer to update it.
 - **xAI**: x-companion calls xAI's Chat Completions endpoint, which xAI now labels legacy in favour of its Responses API. The endpoint still works, and xAI hasn't announced a shutdown date.
 - **Model lists**: the panel fetches models live when it opens, and when you change the provider or key. OpenAI and xAI models show their raw IDs.
 

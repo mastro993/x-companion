@@ -1,22 +1,27 @@
 import { browser } from 'wxt/browser';
 import { defineContentScript } from 'wxt/utils/define-content-script';
-import type {
-  BackgroundRequest,
-  ContentPush,
-  GenerateReplyResponse,
-  StatusResponse,
+import {
+  type ActionId,
+  type ActionResponse,
+  type BackgroundRequest,
+  type ContentPush,
+  MAX_TEXT,
+  type StatusResponse,
 } from '@/lib/messages';
 import {
+  closeMenu,
   composerOf,
+  controlsOf,
   findReplyComposers,
   getTargetPost,
-  injectButton,
-  injectedButtons,
+  injectControls,
+  injectedControls,
+  readEditor,
   removeInjected,
+  renderControls,
   rootOf,
   setComposerText,
   showAlert,
-  updateButton,
 } from '@/lib/x-dom';
 import './style.css';
 
@@ -26,47 +31,63 @@ export default defineContentScript({
   matches: ['https://x.com/*'],
   main(ctx) {
     let ready = false;
-    // Keyed on composer roots: X can re-mount the toolbar (and so our button) mid-generation.
-    const busy = new WeakSet<Element>();
-    const isBusy = (btn: HTMLButtonElement) => {
-      const root = rootOf(btn);
-      return !!root && busy.has(root);
+    // Keyed on composer roots: X can re-mount the toolbar (and so our controls) mid-request.
+    const busy = new WeakMap<Element, ActionId>();
+    const busyIn = (el: Element) => {
+      const root = rootOf(el);
+      return (root && busy.get(root)) ?? null;
     };
-    const render = (btn: HTMLButtonElement) =>
-      updateButton(btn, isBusy(btn) ? 'busy' : ready ? 'ready' : 'setup');
+    const render = (wrap: HTMLElement) => {
+      const c = composerOf(wrap);
+      renderControls(wrap, {
+        ready,
+        busy: busyIn(wrap),
+        hasText: !!c && readEditor(c.editor).trim() !== '',
+      });
+    };
     const setReady = (value: boolean) => {
       ready = value;
-      injectedButtons().forEach(render);
+      injectedControls().forEach(render);
     };
 
-    async function onClick(btn: HTMLButtonElement) {
+    async function onClick(el: HTMLElement, action: ActionId | null) {
       // ctx.isInvalid checks browser.runtime?.id (orphaned after an extension reload) and runs cleanup.
-      if (isBusy(btn) || ctx.isInvalid) return;
+      if (busyIn(el) || ctx.isInvalid) return;
       if (!ready) {
         // Sent synchronously inside the click so the background keeps the user gesture for sidePanel.open.
         send({ type: 'open-side-panel' }).catch(() => {});
         return;
       }
-      const c = composerOf(btn);
+      const wrap = controlsOf(el);
+      const c = composerOf(el);
+      if (!action || !wrap) return;
       const post = c && getTargetPost(c);
-      if (!c || !post) return showAlert(btn, 'Original post not found. Scroll it into view and retry.');
+      if (!c || !post) return showAlert(wrap, 'Original post not found. Scroll it into view and retry.');
+      const draft = readEditor(c.editor);
+      // The controls lag a frame behind typing: never let Generate overwrite a draft.
+      if ((action === 'reply') !== !draft.trim()) return render(wrap);
+      if (draft.length > MAX_TEXT) return showAlert(wrap, 'This draft is too long to rewrite.');
 
       const { root } = c;
       const current = () =>
-        btn.isConnected ? btn : (injectedButtons().find((b) => root.contains(b)) ?? btn);
-      busy.add(root);
-      render(btn);
+        wrap.isConnected ? wrap : (injectedControls().find((w) => root.contains(w)) ?? wrap);
+      busy.set(root, action);
+      render(wrap);
       try {
-        const res = await send<GenerateReplyResponse | undefined>({ type: 'generate-reply', post });
+        const res = await send<ActionResponse | undefined>({ type: 'run-action', action, post, draft });
         if (!res?.ok) throw new Error(res?.error ?? 'No response from x-companion. Reload the page.');
-        // X may have re-mounted the button, the editor or the focal post during the await (closest() includes self).
-        const now = composerOf(btn.isConnected ? btn : root);
+        // X may have re-mounted the controls, the editor or the focal post during the await.
+        // Resolve from the root (closest() includes self): new controls may not be injected yet.
+        const now = composerOf(root);
         if (!now?.editor.isConnected) throw new Error('The reply box is gone.');
         const again = getTargetPost(now);
         if (!again || again.author !== post.author || again.text !== post.text) {
-          throw new Error('The post changed while generating.');
+          throw new Error('The post changed while x-companion was working.');
         }
-        if (!(await setComposerText(now.editor, res.text))) {
+        if (readEditor(now.editor) !== draft) {
+          throw new Error('The reply box changed while x-companion was working. Try again.');
+        }
+        if (res.text !== draft && !(await setComposerText(now.editor, res.text))) {
           throw new Error("Couldn't fill the reply box. Try again.");
         }
       } catch (e) {
@@ -87,19 +108,32 @@ export default defineContentScript({
     const scan = () => {
       queued = false;
       if (ctx.isInvalid) return;
-      for (const c of findReplyComposers()) {
-        const btn = injectButton(c, onClick);
-        if (btn) render(btn);
-      }
+      for (const c of findReplyComposers()) injectControls(c, onClick);
+      injectedControls().forEach(render); // also flips Generate/Rewrite as the box fills or empties
     };
-    // childList only: Draft re-renders on every keystroke; modals mount in #layers under body.
-    const observer = new MutationObserver(() => {
+    const queueScan = () => {
       if (!queued) {
         queued = true;
         requestAnimationFrame(scan);
       }
-    });
+    };
+    // childList: Draft re-renders on every keystroke, and modals mount in #layers under body.
+    // input: the narrow layout's textarea changes without any DOM mutation.
+    const observer = new MutationObserver(queueScan);
     observer.observe(document.body, { childList: true, subtree: true });
+    ctx.addEventListener(document, 'input', queueScan, { capture: true });
+    // Escape would also reach X, which closes the reply dialog: let it close only our menu.
+    ctx.addEventListener(
+      window,
+      'keydown',
+      (e) => {
+        if (e.key === 'Escape' && closeMenu()) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+        }
+      },
+      { capture: true },
+    );
     scan();
 
     ctx.onInvalidated(() => {
