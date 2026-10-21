@@ -3,7 +3,7 @@
 > [!WARNING]
 > x-companion is in early development. Expect rough edges and bugs, and review every draft before you post it. Please [report problems](https://github.com/mastro993/x-companion/issues) you run into.
 
-x-companion is a Chromium extension that drafts replies on X (x.com) in your own writing style. It adds a **Generate** button to X's reply composer. When you click it, the extension sends the post and your style notes to the AI provider you chose, then writes the draft into the reply box. You edit it and post it yourself.
+x-companion is a Chromium extension that drafts replies on X (x.com) in your own writing style. It adds a **Generate** button to X's reply composer. When you click it, the extension sends the post and your style guide to the AI provider you chose, then writes the draft into the reply box. You edit it and post it yourself.
 
 You bring your own API key from one of these providers:
 
@@ -54,14 +54,20 @@ Reload any x.com tab that was open before you installed. The **Generate** button
 
 ## Set up and generate a reply
 
-Setup takes two tabs in the side panel. Once both are filled in, the button is ready on every reply box:
+Setup takes one tab in the side panel, plus an optional style guide. Once a provider and key are set, the button is ready on every reply box:
 
 1. Open x.com and click the x-companion toolbar icon. The side panel opens; it's available only on x.com tabs.
 2. On the **Provider** tab, choose a provider and paste your API key. The key is saved when you paste it, press Enter or leave the field. The panel then verifies the key by loading the provider's model list. Each provider starts with a default model, which you can change.
-3. On the **Style** tab, describe how you write and paste two or three of your past replies. Examples teach the model your style better than adjectives do. Changes save automatically.
+3. Optionally, fill in the style guide on the **Style** tab. It has four sections, and each one holds up to 1000 characters:
+   - **Persona**: who you are and your main interests.
+   - **Audience**: the people you're speaking to and what resonates with them.
+   - **Style & Vocabulary**: your tone, structure and signature phrases. Paste two or three of your past replies here: examples teach the model your style better than adjectives do.
+   - **Rules**: dos and don'ts the AI must always respect, such as "no hashtags" or "always reply in English".
+
+   Only the sections you fill in are sent with each request. Changes save automatically.
 4. When the header shows **Ready**, open a reply: the reply dialog, or the inline reply box on a post's page. Click **Generate**, then review and edit the draft before you post.
 
-Until setup is complete, the button is greyed out, and clicking it opens the side panel. If generation fails, for example from a bad key, a rate limit or a timeout, a short message appears next to the button.
+Until a provider and key are set, the button is greyed out, and clicking it opens the side panel. If generation fails, for example from a bad key, a rate limit or a timeout, a short message appears next to the button.
 
 To keep keys for other providers without switching the active one, save them under **Other saved keys**. **Remove** asks you to confirm inline before it deletes a key.
 

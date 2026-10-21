@@ -1,19 +1,21 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
+import { fakeBrowser } from 'wxt/testing/fake-browser';
 import { PROVIDERS } from './providers';
-import { getStatus, type Settings } from './settings';
+import { getStatus, settingsItem, type Settings } from './settings';
 
 const model = PROVIDERS.openai.defaultModel;
+const style = { persona: '', audience: '', voice: '', rules: '' };
 const complete: Settings = {
   activeProvider: 'openai',
   providers: { openai: { apiKey: 'sk-test', model } },
-  style: 'dry, short',
+  style,
 };
 
 describe('getStatus', () => {
   it.each<[string, Settings, ReturnType<typeof getStatus>]>([
     [
       'no provider beats every other gap',
-      { activeProvider: null, providers: {}, style: '' },
+      { activeProvider: null, providers: {}, style },
       { ready: false, reason: 'no-provider', provider: null },
     ],
     [
@@ -22,17 +24,31 @@ describe('getStatus', () => {
       { ready: false, reason: 'no-key', provider: 'openai' },
     ],
     [
-      'whitespace-only key, before missing style',
-      { ...complete, providers: { openai: { apiKey: '  ', model } }, style: '' },
+      'whitespace-only key',
+      { ...complete, providers: { openai: { apiKey: '  ', model } } },
       { ready: false, reason: 'no-key', provider: 'openai' },
     ],
-    [
-      'whitespace-only style',
-      { ...complete, style: ' \n ' },
-      { ready: false, reason: 'no-style', provider: 'openai' },
-    ],
-    ['everything configured', complete, { ready: true, provider: 'openai', model }],
+    ['key set, style guide optional', complete, { ready: true, provider: 'openai', model }],
   ])('%s', (_, settings, expected) => {
     expect(getStatus(settings)).toEqual(expected);
+  });
+});
+
+describe('settingsItem', () => {
+  beforeEach(() => fakeBrowser.reset());
+
+  it('moves the v1 free-form style into the style & vocabulary section', async () => {
+    const { style: _, ...rest } = complete;
+    await fakeBrowser.storage.local.set({ settings: { ...rest, style: 'dry, short' } });
+    await settingsItem.migrate();
+    expect(await settingsItem.getValue()).toEqual({ ...complete, style: { ...style, voice: 'dry, short' } });
+    expect(await settingsItem.getMeta()).toEqual({ v: 2 });
+  });
+
+  it('leaves a v2 value stored without version meta intact', async () => {
+    const v2 = { ...complete, style: { ...style, persona: 'indie dev', rules: 'no hashtags' } };
+    await fakeBrowser.storage.local.set({ settings: v2 });
+    await settingsItem.migrate();
+    expect(await settingsItem.getValue()).toEqual(v2);
   });
 });
