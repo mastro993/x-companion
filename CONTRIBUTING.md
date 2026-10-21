@@ -90,12 +90,12 @@ x-companion has three parts that talk through extension messages, plus the provi
 
 - **Background service worker** (`src/entrypoints/background.ts`):
   - Enables the side panel and toolbar icon per tab, on x.com only. The manifest has no global `side_panel` entry, so the panel never follows you to other sites.
-  - Answers the content script: it reports the ready status, opens the side panel and runs actions (generate or rewrite a reply).
+  - Answers the content script: it reports the ready status, opens the side panel and runs actions (generate or rewrite a reply). Regenerate reaches it as a plain generate, without the draft.
   - Calls the provider API directly, with a 60s timeout. A keepalive holds the service worker open during long calls.
   - Pushes ready-status changes to open x.com tabs.
 - **Content script** (`src/entrypoints/x.content/`, logic in `src/lib/x-dom.ts`):
   - Watches the page for reply composers: the reply dialog, the inline composer on a post page and the narrow-layout `/compose/post` page.
-  - Inserts the controls before X's **Reply** button: **Generate** on an empty box, **Rewrite** with its menu once the box has text. New-post, quote and home composers get no controls.
+  - Inserts the controls before X's **Reply** button: **Generate** on an empty box, then the **Regenerate** icon and **Rewrite** with its menu once the box has text. New-post, quote and home composers get no controls.
   - The Rewrite menu is a native popover with CSS anchor positioning, so it sits in the top layer and X's overflow can't clip it.
   - Reads the target post: the author, the text with emoji, any quoted post, image alt text and whether **Show more** cut it off.
   - Fills the Draft.js editor with a synthetic paste, then checks the result. A result is dropped if the box changed while the action ran.
@@ -190,16 +190,17 @@ You need an X account and an API key for at least one provider. Use `pnpm dev`, 
    - On the **Projects** tab, add a project. Its **Name** field gets focus. Fill in the fields: the card shows **Saved** shortly after you stop typing. Switch tabs and back: the project kept its text. **Remove** asks to confirm, and **Cancel** keeps it. **Add project** turns off at 10 projects.
 3. **Placement**:
    - **Generate** appears left of **Reply** in the reply dialog (the reply icon under a timeline post) and in the inline reply box on a post's own page.
-   - Type a character: **Generate** becomes **Rewrite**. Delete it: **Generate** comes back.
+   - Type a character: **Generate** becomes **Rewrite**, with the **Regenerate** icon on its left. Delete it: **Generate** comes back alone.
    - No controls appear in the home “What's happening?” box, the new-post dialog or the quote dialog.
 4. **Not ready**:
    - Clear the active provider's API key. The controls turn grey.
-   - Click **Generate**, then type something and click **Rewrite**. Each opens the side panel, and no menu opens.
+   - Click **Generate**, then type something and click **Regenerate** and **Rewrite**. Each opens the side panel, and no menu opens.
    - Paste the key again. The controls become active without a page reload.
 5. **Generate**:
    - Click **Generate**. It shows “Generating…”, then the draft appears in the reply box and the control becomes **Rewrite**.
    - Confirm that X's **Reply** button is enabled, that you can edit the text, and that nothing was posted.
    - Type into the box while it shows “Generating…”. The result is dropped with a message, and your text stays.
+   - With text in the box, click **Regenerate**. The Rewrite pill shows “Regenerating…”, then a fresh reply replaces the text.
 6. **Rewrite**:
    - Click **Rewrite**. A menu with **Polish**, **Punchier** and **Match style** opens under it, or above it when there's no room below. Clicking outside it or pressing Escape closes it.
    - Pick each action on a multi-line draft. The pill shows its progress (“Polishing…”, “Rewriting…”), then the rewrite replaces the draft and keeps its line breaks.

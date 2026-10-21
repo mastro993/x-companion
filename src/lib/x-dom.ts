@@ -20,14 +20,17 @@ interface Composer {
 interface ReplyComposer extends Composer {
   submit: HTMLElement;
 }
+/** What a control runs: an action, or `regenerate`, which runs `reply` without the draft and replaces the box's text. */
+export type ControlAction = ActionId | 'regenerate';
 export interface ControlsState {
   ready: boolean; // setup done
-  busy: ActionId | null; // running in this composer
-  hasText: boolean; // the reply box has text: offer rewrites instead of a fresh reply
+  busy: ControlAction | null; // running in this composer
+  hasText: boolean; // the reply box has text: offer Regenerate and Rewrite instead of Generate
 }
 
-const LABELS: Record<ActionId, { label: string; busy: string }> = {
+const LABELS: Record<ControlAction, { label: string; busy: string }> = {
   reply: { label: 'Generate', busy: 'Generating…' },
+  regenerate: { label: 'Regenerate', busy: 'Regenerating…' },
   polish: { label: 'Polish', busy: 'Polishing…' },
   punchier: { label: 'Punchier', busy: 'Rewriting…' },
   'match-style': { label: 'Match style', busy: 'Rewriting…' },
@@ -111,16 +114,19 @@ function icon(d: string): SVGSVGElement {
 }
 const SPARKLE = 'M12 2l2.4 7.6L22 12l-7.6 2.4L12 22l-2.4-7.6L2 12l7.6-2.4z';
 const CHEVRON = 'M7.4 8.6L12 13.2l4.6-4.6L18 10l-6 6-6-6z';
+const REFRESH =
+  'M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4z';
+const SETUP_HINT = 'x-companion: finish setup in the side panel';
 
 /**
- * Inserts our controls before X's Reply button: a Generate pill, and a Rewrite pill whose menu
- * holds the other actions. `onClick` gets the clicked control and its action; null means the
- * Rewrite pill was clicked while its menu is off (setup unfinished or busy).
+ * Inserts our controls before X's Reply button: a Generate pill, a Regenerate icon, and a Rewrite
+ * pill whose menu holds the other actions. `onClick` gets the clicked control and its action; null
+ * means the Rewrite pill was clicked while its menu is off (setup unfinished or busy).
  * Idempotent: returns null if already there.
  */
 export function injectControls(
   c: ReplyComposer,
-  onClick: (el: HTMLElement, action: ActionId | null) => void,
+  onClick: (el: HTMLElement, action: ControlAction | null) => void,
 ): HTMLElement | null {
   const host = c.submit.parentElement!;
   if (host.querySelector(`[${MARK}]`) || host.closest(INSIDE_EDITOR)) return null;
@@ -132,7 +138,7 @@ export function injectControls(
   wrap.style.color = getComputedStyle(c.editor).color; // X's theme text colour, no theme sniffing
   const page = getComputedStyle(document.body).backgroundColor; // X paints its theme on body
 
-  const button = (className: string, action: ActionId | null, ...content: Node[]) => {
+  const button = (className: string, action: ControlAction | null, ...content: Node[]) => {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = className;
@@ -159,8 +165,9 @@ export function injectControls(
     menu.append(item);
   }
   const generate = button('xc-reply-btn', 'reply', icon(SPARKLE), document.createElement('span'));
+  const regenerate = button('xc-reply-btn xc-reply-btn--icon', 'regenerate', icon(REFRESH));
   const rewrite = button('xc-reply-btn', null, icon(SPARKLE), document.createElement('span'), icon(CHEVRON));
-  wrap.append(generate, rewrite, menu);
+  wrap.append(generate, regenerate, rewrite, menu);
 
   // ponytail: forces a row on react-native-web column hosts (compact detail composer); revisit if X's layout shifts
   if (getComputedStyle(host).flexDirection.startsWith('column')) {
@@ -172,29 +179,36 @@ export function injectControls(
 }
 
 /**
- * Shows Generate on an empty box and Rewrite on a filled one. Rewrites the label only when it
- * changed: a text write is a childList mutation, which would queue another scan.
+ * Shows Generate on an empty box, and Regenerate and Rewrite on a filled one. Rewrites the label
+ * only when it changed: a text write is a childList mutation, which would queue another scan.
  */
 export function renderControls(wrap: Element, { ready, busy, hasText }: ControlsState): void {
-  const [generate, rewrite] = wrap.querySelectorAll<HTMLButtonElement>(':scope > .xc-reply-btn');
+  const [generate, regenerate, rewrite] = wrap.querySelectorAll<HTMLButtonElement>(':scope > .xc-reply-btn');
   const menu = wrap.querySelector<HTMLElement>('.xc-menu');
-  if (!generate || !rewrite || !menu) return;
+  if (!generate || !regenerate || !rewrite || !menu) return;
   const rewriting = busy ? busy !== 'reply' : hasText;
   const btn = rewriting ? rewrite : generate;
   generate.hidden = rewriting;
-  rewrite.hidden = !rewriting;
+  regenerate.hidden = rewrite.hidden = !rewriting;
 
+  // The pill names whatever runs, Regenerate included: the icon has no text of its own.
   const label = busy ? LABELS[busy].busy : rewriting ? 'Rewrite' : LABELS.reply.label;
   const span = btn.querySelector('span')!;
   if (span.textContent !== label) span.textContent = label; // a text write is a childList mutation
-  const attr = (name: string, value: string | false) =>
-    value === false ? btn.removeAttribute(name) : btn.setAttribute(name, value);
-  const verb = busy ? (rewriting ? 'Rewriting draft' : 'Generating reply') : rewriting ? 'Rewrite draft' : 'Generate reply';
-  attr('aria-label', `${verb} with x-companion`);
-  attr('aria-busy', !!busy && 'true');
-  // aria-disabled rather than `disabled`: a setup click must still fire to open the side panel.
-  attr('aria-disabled', !ready && 'true');
-  attr('title', !ready && 'x-companion: finish setup in the side panel');
+  const attr = (el: Element, name: string, value: string | false) =>
+    value === false ? el.removeAttribute(name) : el.setAttribute(name, value);
+  const running = busy === 'regenerate' ? 'Regenerating reply' : rewriting ? 'Rewriting draft' : 'Generating reply';
+  const verb = busy ? running : rewriting ? 'Rewrite draft' : 'Generate reply';
+  attr(btn, 'aria-label', `${verb} with x-companion`);
+  // Keyboard users keep focus on the icon while it runs: its own name must say so.
+  attr(regenerate, 'aria-label', `${busy === 'regenerate' ? 'Regenerating' : 'Regenerate'} reply with x-companion`);
+  for (const el of [btn, regenerate]) {
+    attr(el, 'aria-busy', !!busy && 'true');
+    // aria-disabled rather than `disabled`: a setup click must still fire to open the side panel.
+    attr(el, 'aria-disabled', !ready && 'true');
+  }
+  attr(btn, 'title', !ready && SETUP_HINT);
+  regenerate.title = ready ? LABELS.regenerate.label : SETUP_HINT; // the icon has no visible text
 
   // The invoker is also the menu's implicit anchor and is exempt from its light dismiss.
   const armed = ready && !busy && rewriting;

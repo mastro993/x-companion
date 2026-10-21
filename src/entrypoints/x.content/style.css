@@ -4,6 +4,7 @@
   display: inline-flex;
   flex: none;
   align-items: center;
+  gap: 8px; /* only in-flow pills count: hidden ones, the menu and the alert don't */
   margin-inline-end: 12px;
 }
 
@@ -26,6 +27,12 @@
 }
 .xc-reply-btn[hidden] {
   display: none;
+}
+/* Regenerate: icon only, a circle the pills' height. */
+.xc-reply-btn--icon {
+  justify-content: center;
+  width: 36px;
+  padding: 0;
 }
 .xc-reply-btn svg {
   flex: none;

@@ -135,7 +135,9 @@ describe('controls', () => {
   });
 
   const ready: ControlsState = { ready: true, busy: null, hasText: false };
-  const pills = () => [...wrap.querySelectorAll<HTMLButtonElement>('.xc-reply-btn')].filter((b) => !b.hidden);
+  const pills = () =>
+    [...wrap.querySelectorAll<HTMLButtonElement>('.xc-reply-btn:not(.xc-reply-btn--icon)')].filter((b) => !b.hidden);
+  const regenerate = () => wrap.querySelector<HTMLButtonElement>('.xc-reply-btn--icon')!;
   const shown = () => {
     const [btn, ...rest] = pills();
     expect(rest).toEqual([]);
@@ -149,25 +151,37 @@ describe('controls', () => {
     return e;
   };
 
-  it('offers Generate on an empty box and Rewrite, with its menu, once the box has text', () => {
+  it('offers Generate on an empty box, and Regenerate and Rewrite, with its menu, once the box has text', () => {
     renderControls(wrap, ready);
     expect(shown().textContent).toBe('Generate');
     expect(shown().getAttribute('aria-label')).toBe('Generate reply with x-companion');
+    expect(regenerate().hidden).toBe(true);
 
     renderControls(wrap, { ...ready, hasText: true });
     expect(shown().textContent).toBe('Rewrite');
     expect(shown().popoverTargetElement).toBe(menu());
     expect([...menu().children].map((i) => i.textContent)).toEqual(['Polish', 'Punchier', 'Match style']);
+    expect(regenerate().hidden).toBe(false);
+    expect(regenerate().nextElementSibling).toBe(shown());
+    expect(regenerate().textContent).toBe('');
+    expect(regenerate().getAttribute('aria-label')).toBe('Regenerate reply with x-companion');
+    expect(regenerate().title).toBe('Regenerate');
   });
 
   it('setup: greyed with a hint, and the Rewrite menu stays shut', () => {
     renderControls(wrap, { ...ready, ready: false, hasText: true });
-    expect(shown().getAttribute('aria-disabled')).toBe('true');
-    expect(shown().title).toBe('x-companion: finish setup in the side panel');
+    for (const btn of [shown(), regenerate()]) {
+      expect(btn.getAttribute('aria-disabled')).toBe('true');
+      expect(btn.title).toBe('x-companion: finish setup in the side panel');
+    }
     expect(shown().popoverTargetElement).toBeNull();
     // The click reaches the content script, which opens the side panel.
     expect(trustedClick(shown()).defaultPrevented).toBe(true);
     expect(onClick).toHaveBeenCalledWith(shown(), null);
+
+    renderControls(wrap, { ...ready, hasText: true });
+    expect(regenerate().hasAttribute('aria-disabled')).toBe(false);
+    expect(regenerate().title).toBe('Regenerate');
   });
 
   it('busy: the running action shows on its pill, whatever the box holds', () => {
@@ -182,6 +196,21 @@ describe('controls', () => {
     renderControls(wrap, ready);
     expect(shown().hasAttribute('aria-busy')).toBe(false);
     expect(shown().hasAttribute('aria-disabled')).toBe(false);
+  });
+
+  it('busy: Regenerate keeps its place and names itself on the Rewrite pill', () => {
+    renderControls(wrap, { ...ready, busy: 'regenerate', hasText: false });
+    expect(regenerate().hidden).toBe(false);
+    expect(shown().textContent).toBe('Regenerating…');
+    expect(shown().getAttribute('aria-label')).toBe('Regenerating reply with x-companion');
+    expect(shown().popoverTargetElement).toBeNull();
+    expect(regenerate().getAttribute('aria-label')).toBe('Regenerating reply with x-companion');
+    for (const btn of [shown(), regenerate()]) expect(btn.getAttribute('aria-busy')).toBe('true');
+
+    renderControls(wrap, { ...ready, hasText: true });
+    expect(shown().textContent).toBe('Rewrite');
+    expect(regenerate().getAttribute('aria-label')).toBe('Regenerate reply with x-companion');
+    expect(regenerate().hasAttribute('aria-busy')).toBe(false);
   });
 
   it('re-rendering an unchanged state causes no childList mutation', () => {
@@ -207,10 +236,16 @@ describe('controls', () => {
     expect(HTMLElement.prototype.hidePopover).toHaveBeenCalled();
   });
 
+  it('Regenerate runs its own action', () => {
+    renderControls(wrap, { ...ready, hasText: true });
+    expect(trustedClick(regenerate()).defaultPrevented).toBe(true);
+    expect(onClick).toHaveBeenCalledExactlyOnceWith(regenerate(), 'regenerate');
+  });
+
   it('ignores untrusted (scripted) clicks', () => {
     renderControls(wrap, ready);
     const item = menu().firstElementChild as HTMLElement;
-    for (const el of [shown(), item]) {
+    for (const el of [shown(), regenerate(), item]) {
       el.click();
       el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     }

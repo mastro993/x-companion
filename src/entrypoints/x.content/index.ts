@@ -1,7 +1,6 @@
 import { browser } from 'wxt/browser';
 import { defineContentScript } from 'wxt/utils/define-content-script';
 import {
-  type ActionId,
   type ActionResponse,
   type BackgroundRequest,
   type ContentPush,
@@ -11,6 +10,7 @@ import {
 import {
   closeMenu,
   composerOf,
+  type ControlAction,
   controlsOf,
   findReplyComposers,
   getTargetPost,
@@ -32,7 +32,7 @@ export default defineContentScript({
   main(ctx) {
     let ready = false;
     // Keyed on composer roots: X can re-mount the toolbar (and so our controls) mid-request.
-    const busy = new WeakMap<Element, ActionId>();
+    const busy = new WeakMap<Element, ControlAction>();
     const busyIn = (el: Element) => {
       const root = rootOf(el);
       return (root && busy.get(root)) ?? null;
@@ -50,7 +50,7 @@ export default defineContentScript({
       injectedControls().forEach(render);
     };
 
-    async function onClick(el: HTMLElement, action: ActionId | null) {
+    async function onClick(el: HTMLElement, action: ControlAction | null) {
       // ctx.isInvalid checks browser.runtime?.id (orphaned after an extension reload) and runs cleanup.
       if (busyIn(el) || ctx.isInvalid) return;
       if (!ready) {
@@ -66,7 +66,9 @@ export default defineContentScript({
       const draft = readEditor(c.editor);
       // The controls lag a frame behind typing: never let Generate overwrite a draft.
       if ((action === 'reply') !== !draft.trim()) return render(wrap);
-      if (draft.length > MAX_TEXT) return showAlert(wrap, 'This draft is too long to rewrite.');
+      // Regenerate is Generate over a filled box: the fresh reply never sees the draft.
+      const run = action === 'regenerate' ? { action: 'reply' as const, draft: '' } : { action, draft };
+      if (run.draft.length > MAX_TEXT) return showAlert(wrap, 'This draft is too long to rewrite.');
 
       const { root } = c;
       const current = () =>
@@ -74,7 +76,7 @@ export default defineContentScript({
       busy.set(root, action);
       render(wrap);
       try {
-        const res = await send<ActionResponse | undefined>({ type: 'run-action', action, post, draft });
+        const res = await send<ActionResponse | undefined>({ type: 'run-action', post, ...run });
         if (!res?.ok) throw new Error(res?.error ?? 'No response from x-companion. Reload the page.');
         // X may have re-mounted the controls, the editor or the focal post during the await.
         // Resolve from the root (closest() includes self): new controls may not be injected yet.
