@@ -72,6 +72,15 @@ function httpError(status: number, message: string): string {
 
 const isTimeout = (e: unknown) => e instanceof DOMException && e.name === 'TimeoutError';
 
+/** A non-2xx answer, with its status for callers that branch on it. */
+class HttpError extends Error {
+  readonly status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
 export async function fetchJson<T>(
   url: string,
   init: RequestInit,
@@ -95,7 +104,7 @@ export async function fetchJson<T>(
   const message =
     typeof err === 'string' ? err : err ? (err.message ?? 'Unknown error') : body?.detail?.message;
   if (!res.ok) {
-    throw new Error(httpError(res.status, message || res.statusText || 'Request failed'));
+    throw new HttpError(res.status, httpError(res.status, message || res.statusText || 'Request failed'));
   }
   // OpenRouter can fail with HTTP 200 and a top-level error.
   if (message) throw new Error(message);
@@ -135,43 +144,71 @@ function anthropicText(res: AnthropicResponse): string {
     .join('');
 }
 
+/** The user turn: each picture after its label, then the text. Anthropic advises images first. */
+const userContent = ({ user, images }: Prompt, image: (url: string) => object) =>
+  images.length === 0
+    ? user
+    : [
+        ...images.flatMap(({ label, url }) => [{ type: 'text', text: `${label}:` }, image(url)]),
+        { type: 'text', text: user },
+      ];
+
+async function send({ provider, apiKey, model }: LlmConfig, prompt: Prompt): Promise<string> {
+  // Never send temperature/top_p/top_k: current reasoning models reject them.
+  return provider === 'anthropic'
+    ? anthropicText(
+        await fetchJson<AnthropicResponse>(
+          `${ANTHROPIC_BASE}/messages`,
+          postJson(provider, apiKey, {
+            model: model.id,
+            max_tokens: MAX_OUTPUT_TOKENS,
+            system: prompt.system,
+            messages: [
+              {
+                role: 'user',
+                content: userContent(prompt, (url) => ({ type: 'image', source: { type: 'url', url } })),
+              },
+            ],
+            ...(model.lowEffort && { output_config: { effort: 'low' } }),
+          }),
+        ),
+      )
+    : chatText(
+        await fetchJson<ChatResponse>(
+          `${CHAT_BASE[provider]}/chat/completions`,
+          postJson(provider, apiKey, {
+            model: model.id,
+            messages: [
+              { role: 'system', content: prompt.system },
+              { role: 'user', content: userContent(prompt, (url) => ({ type: 'image_url', image_url: { url } })) },
+            ],
+            // Many OpenRouter models list only max_tokens, and DeepSeek ignores
+            // max_completion_tokens; OpenAI and xAI deprecated max_tokens.
+            [provider === 'openrouter' || provider === 'deepseek'
+              ? 'max_tokens'
+              : 'max_completion_tokens']: MAX_OUTPUT_TOKENS,
+            ...(model.lowEffort && { reasoning_effort: 'low' }),
+            ...(provider === 'openai' && { store: false }),
+          }),
+        ),
+      );
+}
+
+// How providers reject pictures: a text-only model (OpenRouter answers 404 "No endpoints found
+// that support image input"), or an image they couldn't fetch or read. 401, 402 and 429 aren't.
+const IMAGE_REJECTED = [400, 404, 422];
+
 /** Throws Error with a short user-facing message on any failure. */
 export async function generateText(cfg: LlmConfig, prompt: Prompt): Promise<string> {
-  const { provider, apiKey, model } = cfg;
-  // Never send temperature/top_p/top_k: current reasoning models reject them.
-  const text =
-    provider === 'anthropic'
-      ? anthropicText(
-          await fetchJson<AnthropicResponse>(
-            `${ANTHROPIC_BASE}/messages`,
-            postJson(provider, apiKey, {
-              model: model.id,
-              max_tokens: MAX_OUTPUT_TOKENS,
-              system: prompt.system,
-              messages: [{ role: 'user', content: prompt.user }],
-              ...(model.lowEffort && { output_config: { effort: 'low' } }),
-            }),
-          ),
-        )
-      : chatText(
-          await fetchJson<ChatResponse>(
-            `${CHAT_BASE[provider]}/chat/completions`,
-            postJson(provider, apiKey, {
-              model: model.id,
-              messages: [
-                { role: 'system', content: prompt.system },
-                { role: 'user', content: prompt.user },
-              ],
-              // Many OpenRouter models list only max_tokens, and DeepSeek ignores
-              // max_completion_tokens; OpenAI and xAI deprecated max_tokens.
-              [provider === 'openrouter' || provider === 'deepseek'
-                ? 'max_tokens'
-                : 'max_completion_tokens']: MAX_OUTPUT_TOKENS,
-              ...(model.lowEffort && { reasoning_effort: 'low' }),
-              ...(provider === 'openai' && { store: false }),
-            }),
-          ),
-        );
+  let text: string;
+  try {
+    text = await send(cfg, prompt);
+  } catch (e) {
+    // Not every model takes images, and a provider can fail to fetch one: retry once without
+    // them. The [Image N] markers and alt text stay in the prompt.
+    if (!prompt.images.length || !(e instanceof HttpError && IMAGE_REJECTED.includes(e.status))) throw e;
+    text = await send(cfg, { ...prompt, images: [] });
+  }
   if (!text.trim()) throw new Error(EMPTY);
   return text;
 }

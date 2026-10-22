@@ -9,7 +9,12 @@ x-companion is a Chromium extension that drafts replies on X (x.com) in your own
 - **Regenerate**, an icon left of **Rewrite** once the box has text: drafts a fresh reply to the post from scratch and replaces the box's text with it.
 - **Rewrite**, once the box has text: a menu that reworks your draft. **Polish** fixes typos, grammar and awkward phrasing with the smallest edits. **Punchier** makes it clearer and catchier. **Match style** brings it closer to your style guide.
 
-The extension sends the post, your draft, your style guide and your projects to the AI provider you chose, then writes the result into the reply box. You edit it and post it yourself.
+The extension sends the post, the conversation around it, any post it quotes and their images, along with your draft, your style guide and your projects, to the AI provider you chose. It then writes the result into the reply box. You edit it and post it yourself.
+
+What the model sees depends on where you reply:
+
+- **On a post's page**: the post, its quoted post and their images, plus the conversation. That's the posts X shows above it, and its author's own posts right below it, such as the rest of a thread, up to 10 on each side.
+- **In the reply dialog from a timeline**: the post, its quoted post and their images. A timeline shows posts out of their conversation, so none is sent.
 
 You bring your own API key from one of these providers:
 
@@ -25,10 +30,10 @@ x-companion has no backend. It talks only to x.com and the provider you pick:
 
 - **Your keys stay in your browser**: API keys live in `chrome.storage.local`, apart from your other settings, and storage is restricted to trusted extension contexts (`setAccessLevel('TRUSTED_CONTEXTS')`). Only the background service worker and the side panel can read them; the content script on x.com can't. A saved key shows only masked in the panel, and keys aren't synced across devices.
 - **Saved keys aren't encrypted**: like all extension storage, they sit unencrypted in your browser profile, where backups and malware that copies files can reach them, and anyone using your unlocked computer can read them. The **Provider** tab reminds you of this. So give each key a spending limit, as described in [Limit what a key can spend](#limit-what-a-key-can-spend). **Remove** doesn't erase copies already on disk right away, so if you think a key leaked, revoke it with your provider. Full-disk encryption, such as FileVault or BitLocker, protects a lost or stolen laptop.
-- **Post text goes only to your provider**: when you run an action, the extension sends the post's author handle, its text, any quoted post and image alt text to the provider you selected, along with your style guide, your projects and, for a rewrite, the text in the reply box. There's no analytics or telemetry. OpenAI requests are sent with `store: false`.
+- **Post content goes only to your provider**: when you run an action, the extension sends the provider you selected the author handle and text of the post, of any post it quotes and of the conversation around it. It also sends the links to their photos and video thumbnails, with their alt text, and your own @handle, so the model knows which posts are yours. Your style guide, your projects and, for a rewrite, the text in the reply box go along too. The provider downloads the pictures from X's image server (`pbs.twimg.com`) itself, so the extension needs no extra permission for them. There's no analytics or telemetry. OpenAI requests are sent with `store: false`.
 - **It never posts**: the extension only replaces the text in the reply box. Nothing reaches X until you click **Reply**.
 - **Minimal permissions**: `storage` and `sidePanel`, plus host access to x.com, the five provider APIs and TypeSafe's API, which nothing uses yet. It doesn't request the `tabs` permission.
-- **The page can't drive it**: the content script acts only on real (trusted) user clicks. The background checks that each message comes from an x.com tab, validates its shape and caps field lengths. The prompt wraps post text and your draft in delimiters and tells the model to treat them as material, not instructions.
+- **The page can't drive it**: the content script acts only on real (trusted) user clicks. The background checks that each message comes from an x.com tab, validates its shape and caps field lengths. It accepts image links only to X's image server, so the page can't make your provider fetch other addresses. The prompt wraps post text and your draft in delimiters and tells the model to treat them as material, not instructions.
 - **Errors give nothing away**: before an error message reaches x.com, the background removes your key and anything shaped like a key or an account ID, and shortens the message.
 
 ### Limit what a key can spend
@@ -111,7 +116,11 @@ To keep keys for other providers without switching the active one, save them und
 
 These gaps are known and not yet fixed:
 
-- **Long posts**: only the visible part of a long post (before **Show more**) is sent. The prompt tells the model the post is truncated.
+- **Long posts**: only the visible part of a long post (before **Show more**) is sent. That holds for the posts around it and quoted posts too. The prompt tells the model which posts are truncated.
+- **Conversations**: the conversation is sent only from a post's page, and only the part X has loaded, up to the 10 nearest posts above the post and 10 below it. X can leave out older posts above a reply, and drops posts far off screen. For a later part of the main author's own thread, its earlier parts are sent. For any other reply below the main post, the posts down to the main post are sent, but not the other replies in between. To give the model a whole conversation, open the post you reply to on its own page.
+- **Reply dialog without its post**: the dialog's copy of a post has no images or quoted post. The extension takes them from the matching post on the page, or from the post whose **Reply** button you clicked or that X's `r` shortcut replied to. When it has neither, for example after a page reload, only the copy's text is sent.
+- **Link previews and polls**: a link's preview card and a poll's options aren't sent, only the post's own text.
+- **Images**: each request sends up to 8 pictures, about 1200 px each: the post's first, then its quoted post's, then the nearest in the conversation. The others are described only by their alt text. For a video or GIF, the model sees only its thumbnail. When the model can't read images, or the provider can't download one, the extension retries once without pictures, and the model goes by the alt text.
 - **X markup changes**: X can change its page structure at any time, which can stop the controls from appearing or from filling the box. If the extension can't verify the filled text, the controls show an error. Check the reply box, because X may have accepted part of the draft.
 - **Composers without controls**: in a multi-post reply thread, only the first box gets controls. Inline reply boxes under individual comments, new posts and quotes get none.
 - **Theme switches**: the controls copy X's text colour when they're inserted. After you switch X's theme, close and reopen the composer to update it.

@@ -22,6 +22,8 @@ import {
   rootOf,
   setComposerText,
   showAlert,
+  trackReplySource,
+  viewerHandle,
 } from '@/lib/x-dom';
 import './style.css';
 
@@ -76,7 +78,7 @@ export default defineContentScript({
       busy.set(root, action);
       render(wrap);
       try {
-        const res = await send<ActionResponse | undefined>({ type: 'run-action', post, ...run });
+        const res = await send<ActionResponse | undefined>({ type: 'run-action', post, me: viewerHandle(), ...run });
         if (!res?.ok) throw new Error(res?.error ?? 'No response from x-companion. Reload the page.');
         // X may have re-mounted the controls, the editor or the focal post during the await.
         // Resolve from the root (closest() includes self): new controls may not be injected yet.
@@ -124,6 +126,9 @@ export default defineContentScript({
     const observer = new MutationObserver(queueScan);
     observer.observe(document.body, { childList: true, subtree: true });
     ctx.addEventListener(document, 'input', queueScan, { capture: true });
+    // Before X opens the reply dialog: its copy of the post lacks the media and the quoted post.
+    ctx.addEventListener(document, 'click', trackReplySource, { capture: true });
+    ctx.addEventListener(document, 'keydown', trackReplySource, { capture: true });
     // Escape would also reach X, which closes the reply dialog: let it close only our menu.
     ctx.addEventListener(
       window,

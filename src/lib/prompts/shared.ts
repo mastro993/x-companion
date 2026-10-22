@@ -1,8 +1,10 @@
-import type { TargetPost } from '../messages';
+import type { Post, PostImage, TargetPost } from '../messages';
 import { type Project, STYLE_FIELDS, type StyleField, type StyleGuide } from '../settings';
-import type { PromptConfig } from './types';
+import type { PromptConfig, PromptImage } from './types';
 
 export const MAX_REPLY_CHARS = 280;
+/** Most pictures sent with one request. The rest keep their marker and alt text. */
+const MAX_PROMPT_IMAGES = 8;
 
 // Each section's tag is its field name.
 const STYLE_INTROS: Record<StyleField, string> = {
@@ -16,7 +18,7 @@ const STYLE_INTROS: Record<StyleField, string> = {
 // profile section. Repeat until stable, or '</pos</post>t>' would rebuild a tag. [^<>] keeps
 // each pass linear on unclosed '<post' runs.
 const DELIMITER = new RegExp(
-  `<\\s*/?\\s*(?:post|context|draft|projects|${STYLE_FIELDS.join('|')})\\b[^<>]*>`,
+  `<\\s*/?\\s*(?:post|earlier|later|quote|draft|projects|${STYLE_FIELDS.join('|')})\\b[^<>]*>`,
   'gi',
 );
 
@@ -56,24 +58,45 @@ export function profile({ style, projects }: Omit<PromptConfig, 'context'>): str
   return styleGuide(style) + projectList(projects);
 }
 
-/** The post being replied to, after what the page showed around it. */
-export function postBlock(post: TargetPost): string {
-  const context: string[] = [];
-  if (post.quoted) context.push(`The post quotes this post:\n${untrusted(post.quoted)}`);
-  if (post.images.length > 0) {
-    const alts = post.images.map((alt) => `"${untrusted(alt)}"`).join(', ');
-    context.push(`The post has ${post.images.length} image(s), with alt text: ${alts}`);
-  }
-  if (post.truncated) {
-    context.push('The post is longer than shown; only its visible part is below.');
-  }
+/** Rules that explain postBlock's layout, for every system prompt. */
+export const materialRules = (me: string) => `- <earlier> posts come before <post> in the conversation, oldest first. <later> posts are its author's own follow-ups below it. A <quote> is the post that the post around it quotes. truncated="true" marks a post shown only up to "Show more".
+- [Image N] and [Video N] mark a post's media, then its alt text if any. A picture labelled "Image N:" or "Video N:" that comes with the message is that media (a video's is its thumbnail). For media without one, go by the alt text only and never guess what it shows.${
+  // Handles are [A-Za-z0-9_], and the background checks this one.
+  me && `\n- The user is ${me}: posts by ${me} are the user's own.`
+}`;
 
+type Label = (image: PostImage) => string;
+
+function block(tag: string, post: Post, label: Label): string {
+  const lines = [untrusted(post.text)];
+  for (const image of post.images) {
+    const alt = oneLine(untrusted(image.alt));
+    lines.push(`[${label(image)}${alt && `: ${alt}`}]`);
+  }
+  if (post.quoted) lines.push(block('quote', post.quoted, label));
   // Handles are [A-Za-z0-9_]; anything else would break out of the attribute.
   const author = post.author.replace(/[^\w@]/g, '');
-  return [
-    context.length > 0 ? `<context>\n${context.join('\n')}\n</context>\n` : '',
-    `<post${author ? ` author="${author}"` : ''}>\n${untrusted(post.text)}\n</post>`,
-  ].join('');
+  const attrs = `${author && ` author="${author}"`}${post.truncated ? ' truncated="true"' : ''}`;
+  return `<${tag}${attrs}>\n${lines.filter(Boolean).join('\n')}\n</${tag}>`;
+}
+
+/** The post being replied to, inside the conversation the page showed, and the pictures to attach. */
+export function postBlock(post: TargetPost): { text: string; images: PromptImage[] } {
+  // Pictures by priority: the post's, its quote's, then the thread's, nearest first.
+  const sent = [post, ...post.earlier.toReversed(), ...post.later]
+    .flatMap((p) => [...p.images, ...(p.quoted?.images ?? [])])
+    .slice(0, MAX_PROMPT_IMAGES);
+  // Sent pictures are numbered; the rest keep a bare marker.
+  const label: Label = (image) => {
+    const i = sent.indexOf(image);
+    return `${image.video ? 'Video' : 'Image'}${i < 0 ? '' : ` ${i + 1}`}`;
+  };
+  const text = [
+    ...post.earlier.map((p) => block('earlier', p, label)),
+    block('post', post, label),
+    ...post.later.map((p) => block('later', p, label)),
+  ].join('\n');
+  return { text, images: sent.map((image) => ({ label: label(image), url: image.url })) };
 }
 
 // '"Fake news" is old' and '"a" or "b"' keep their quotes.

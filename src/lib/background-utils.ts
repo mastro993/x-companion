@@ -1,8 +1,19 @@
-import { ACTIONS, type ActionId, type BackgroundRequest, MAX_TEXT, type TargetPost } from './messages';
+import {
+  ACTIONS,
+  type ActionId,
+  type BackgroundRequest,
+  MAX_TEXT,
+  type Post,
+  type PostImage,
+  type TargetPost,
+} from './messages';
 
 const MAX_AUTHOR = 100;
-const MAX_IMAGES = 4;
+const MAX_IMAGES = 4; // X's limit per post
 const MAX_ALT = 500;
+const MAX_URL = 500;
+/** Most posts kept on each side of the target post: the nearest ones. */
+const MAX_THREAD = 10;
 
 const MAX_ERROR = 200;
 // Key shapes (sk-, sk-ant-, sk-or-, xai-), OpenAI org- and proj_ IDs, and UUIDs such as xAI team IDs.
@@ -21,38 +32,74 @@ export function isXUrl(url: string | undefined): boolean {
 
 const isString = (v: unknown): v is string => typeof v === 'string';
 const isAction = (v: unknown): v is ActionId => ACTIONS.includes(v as ActionId);
+const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
 
-function parsePost(v: unknown): TargetPost | null {
-  if (typeof v !== 'object' || v === null) return null;
-  const { author, text, quoted, images, truncated } = v as Record<string, unknown>;
-  if (
-    !isString(author) ||
-    !isString(text) ||
-    !isString(quoted) ||
-    typeof truncated !== 'boolean' ||
-    !Array.isArray(images) ||
-    !images.every(isString)
-  ) {
-    return null;
-  }
+/**
+ * Only X's media server: providers fetch these URLs, so a page must not pick what they fetch. The
+ * parsed form goes on, so a provider can't read the host differently (`https://pbs.twimg.com\@evil`).
+ */
+function mediaUrl(raw: string): string | null {
+  const u = URL.parse(raw);
+  const ok = u?.protocol === 'https:' && u.hostname === 'pbs.twimg.com' && !u.port && !u.username && !u.password;
+  return ok && u.href.length <= MAX_URL ? u.href : null;
+}
+
+function parseImage(v: unknown): PostImage | null {
+  if (!isObject(v)) return null;
+  const { alt, video } = v;
+  const url = isString(v.url) ? mediaUrl(v.url) : null;
+  if (!url || !isString(alt) || typeof video !== 'boolean') return null;
+  return { url, alt: alt.slice(0, MAX_ALT), video };
+}
+
+/** Every item parsed, or null if any fails. `keep` caps the list before any parsing. */
+function parseAll<T>(
+  items: unknown,
+  keep: (items: unknown[]) => unknown[],
+  parse: (v: unknown) => T | null,
+): T[] | null {
+  if (!Array.isArray(items)) return null;
+  const parsed = keep(items).map((v) => parse(v));
+  return parsed.includes(null) ? null : (parsed as T[]);
+}
+
+/** A quoted post's own quote is dropped: X shows only one level. */
+function parsePost(v: unknown, canQuote = true): Post | null {
+  if (!isObject(v)) return null;
+  const { author, text, truncated, quoted } = v;
+  const images = parseAll(v.images, (i) => i.slice(0, MAX_IMAGES), parseImage);
+  if (!isString(author) || !isString(text) || typeof truncated !== 'boolean' || !images) return null;
+  if (quoted !== null && !isObject(quoted)) return null;
+  const quote = quoted && canQuote ? parsePost(quoted, false) : null;
+  if (quoted && canQuote && !quote) return null;
   return {
     author: author.slice(0, MAX_AUTHOR),
     text: text.slice(0, MAX_TEXT),
-    quoted: quoted.slice(0, MAX_TEXT),
-    images: images.slice(0, MAX_IMAGES).map((alt) => alt.slice(0, MAX_ALT)),
-    truncated,
+    images,
+    truncated: truncated || text.length > MAX_TEXT,
+    quoted: quote,
   };
+}
+
+function parseTarget(v: unknown): TargetPost | null {
+  const post = parsePost(v);
+  if (!post || !isObject(v)) return null;
+  // The nearest posts matter most: the end of what came before, the start of what follows.
+  const earlier = parseAll(v.earlier, (p) => p.slice(-MAX_THREAD), parsePost);
+  const later = parseAll(v.later, (p) => p.slice(0, MAX_THREAD), parsePost);
+  return earlier && later && { ...post, earlier, later };
 }
 
 /** Content-script messages are untrusted: rebuild a known shape with capped lengths, or null. */
 export function parseRequest(msg: unknown): BackgroundRequest | null {
   if (typeof msg !== 'object' || msg === null) return null;
-  const { type, action, post, draft } = msg as Record<string, unknown>;
+  const { type, action, post, draft, me } = msg as Record<string, unknown>;
   if (type === 'get-status' || type === 'open-side-panel') return { type };
   // A cut draft would come back rewritten without its tail, so an over-long one is refused, not capped.
   if (type !== 'run-action' || !isAction(action) || !isString(draft) || draft.length > MAX_TEXT) {
     return null;
   }
-  const parsed = parsePost(post);
-  return parsed && { type, action, post: parsed, draft };
+  if (!isString(me) || !/^(?:@\w{1,15})?$/.test(me)) return null;
+  const parsed = parseTarget(post);
+  return parsed && { type, action, post: parsed, draft, me };
 }

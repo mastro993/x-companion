@@ -39,6 +39,7 @@ async function runAction({
   action,
   post,
   draft,
+  me,
 }: Extract<BackgroundRequest, { type: 'run-action' }>): Promise<string> {
   const settings = await getSettings();
   const status = getStatus(settings);
@@ -51,7 +52,7 @@ async function runAction({
       await generateText(
         { provider: status.provider, apiKey, model: status.model },
         PROMPTS[action]({
-          context: { post, draft },
+          context: { post, draft, me },
           style: settings.style,
           projects: settings.projects,
         }),

@@ -25,7 +25,14 @@ const cfg = (provider: ProviderId, lowEffort = true): LlmConfig => ({
   apiKey: 'k-123',
   model: { id: 'm-1', label: 'M 1', lowEffort },
 });
-const prompt = { system: 'SYS', user: 'USER' };
+const prompt = { system: 'SYS', user: 'USER', images: [] };
+const withImages = {
+  ...prompt,
+  images: [
+    { label: 'Image 1', url: 'https://pbs.twimg.com/media/a?format=jpg&name=medium' },
+    { label: 'Video 2', url: 'https://pbs.twimg.com/amplify_video_thumb/1/img/k?format=jpg&name=medium' },
+  ],
+};
 const chatOk = (content: string | null, finish_reason = 'stop') =>
   json({ choices: [{ finish_reason, message: { content } }] });
 
@@ -101,6 +108,72 @@ describe('generateText request shape', () => {
     expect(body).not.toHaveProperty('reasoning_effort');
     expect(body).not.toHaveProperty('output_config');
     expect(body).not.toHaveProperty('temperature');
+  });
+});
+
+describe('generateText images', () => {
+  it.each(['openai', 'xai', 'deepseek', 'openrouter'] as const)('%s sends labelled image_url parts before the text', async (p) => {
+    const fn = mockFetch(() => chatOk('ok'));
+    await generateText(cfg(p), withImages);
+    expect(call(fn).body.messages[1]).toEqual({
+      role: 'user',
+      content: [
+        { type: 'text', text: 'Image 1:' },
+        { type: 'image_url', image_url: { url: withImages.images[0]!.url } },
+        { type: 'text', text: 'Video 2:' },
+        { type: 'image_url', image_url: { url: withImages.images[1]!.url } },
+        { type: 'text', text: 'USER' },
+      ],
+    });
+  });
+
+  it('anthropic sends labelled URL image blocks before the text', async () => {
+    const fn = mockFetch(() => json({ content: [{ type: 'text', text: 'ok' }] }));
+    await generateText(cfg('anthropic'), withImages);
+    expect(call(fn).body.messages).toEqual([
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Image 1:' },
+          { type: 'image', source: { type: 'url', url: withImages.images[0]!.url } },
+          { type: 'text', text: 'Video 2:' },
+          { type: 'image', source: { type: 'url', url: withImages.images[1]!.url } },
+          { type: 'text', text: 'USER' },
+        ],
+      },
+    ]);
+  });
+
+  it.each<[string, ProviderId, Response]>([
+    ['text-only DeepSeek model', 'deepseek', json({ error: { message: 'unknown variant `image_url`, expected `text`' } }, 400)],
+    ['OpenRouter without a vision endpoint', 'openrouter', json({ error: { message: 'No endpoints found that support image input', code: 404 } }, 404)],
+    ['image the provider could not fetch', 'openai', json({ error: { message: 'Timeout while downloading', code: 'invalid_image_url' } }, 400)],
+    ['xAI field error', 'xai', json({ error: 'invalid image' }, 422)],
+  ])('retries once without images after a rejection: %s', async (_, provider, rejection) => {
+    const fn = mockFetch(() => (fn.mock.calls.length === 1 ? rejection : chatOk('Text-only reply')));
+    await expect(generateText(cfg(provider), withImages)).resolves.toBe('Text-only reply');
+    expect(fn).toHaveBeenCalledTimes(2);
+    expect(call(fn, 1).body.messages[1]).toEqual({ role: 'user', content: 'USER' });
+  });
+
+  it.each<[string, () => Response]>([
+    ['bad key', () => json({ error: { message: 'Incorrect API key' } }, 401)],
+    ['lack of credits', () => json({ error: { message: 'Insufficient credits' } }, 402)],
+    ['rate limit', () => json({ error: { message: 'slow down' } }, 429)],
+    ['server error', () => new Response('<html>', { status: 502, statusText: 'Bad Gateway' })],
+  ])('does not retry a %s', async (_, res) => {
+    const fn = mockFetch(res);
+    await expect(generateText(cfg('openai'), withImages)).rejects.toThrow();
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports the retry’s error, and never retries a request without images', async () => {
+    const fn = mockFetch(() => json({ error: { message: 'Model not found' } }, 400));
+    await expect(generateText(cfg('openai'), withImages)).rejects.toThrow('400: Model not found');
+    expect(fn).toHaveBeenCalledTimes(2);
+    fn.mockClear();
+    await expect(generateText(cfg('openai'), prompt)).rejects.toThrow('400: Model not found');
+    expect(fn).toHaveBeenCalledTimes(1);
   });
 });
 
