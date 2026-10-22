@@ -23,11 +23,23 @@ You bring your own API key from one of these providers:
 
 x-companion has no backend. It talks only to x.com and the provider you pick:
 
-- **Your keys stay in your browser**: API keys and settings live in `chrome.storage.local`, restricted to trusted extension contexts (`setAccessLevel('TRUSTED_CONTEXTS')`). Only the background service worker and the side panel can read them; the content script on x.com can't. Keys aren't synced across devices, and like all extension storage, they're stored unencrypted in your browser profile.
+- **Your keys stay in your browser**: API keys live in `chrome.storage.local`, apart from your other settings, and storage is restricted to trusted extension contexts (`setAccessLevel('TRUSTED_CONTEXTS')`). Only the background service worker and the side panel can read them; the content script on x.com can't. A saved key shows only masked in the panel, and keys aren't synced across devices.
+- **Saved keys aren't encrypted**: like all extension storage, they sit unencrypted in your browser profile, where backups and malware that copies files can reach them, and anyone using your unlocked computer can read them. The **Provider** tab reminds you of this. So give each key a spending limit, as described in [Limit what a key can spend](#limit-what-a-key-can-spend). **Remove** doesn't erase copies already on disk right away, so if you think a key leaked, revoke it with your provider. Full-disk encryption, such as FileVault or BitLocker, protects a lost or stolen laptop.
 - **Post text goes only to your provider**: when you run an action, the extension sends the post's author handle, its text, any quoted post and image alt text to the provider you selected, along with your style guide, your projects and, for a rewrite, the text in the reply box. There's no analytics or telemetry. OpenAI requests are sent with `store: false`.
 - **It never posts**: the extension only replaces the text in the reply box. Nothing reaches X until you click **Reply**.
 - **Minimal permissions**: `storage` and `sidePanel`, plus host access to x.com, the five provider APIs and TypeSafe's API, which nothing uses yet. It doesn't request the `tabs` permission.
 - **The page can't drive it**: the content script acts only on real (trusted) user clicks. The background checks that each message comes from an x.com tab, validates its shape and caps field lengths. The prompt wraps post text and your draft in delimiters and tells the model to treat them as material, not instructions.
+- **Errors give nothing away**: before an error message reaches x.com, the background removes your key and anything shaped like a key or an account ID, and shortens the message.
+
+### Limit what a key can spend
+
+Storage can't stop every threat, for example a compromised release or another extension clicking the controls for you. Give x-companion its own key with a spending cap, so a leaked key can't cost much. Where your provider offers it, also set an expiry date, and save only the keys you use:
+
+- **OpenAI**: create a project with a hard monthly spend limit. In it, create a key with **Restricted** permissions that can only list models and make model requests.
+- **Anthropic**: create a workspace other than the default one, which can't have a spend limit, and set its monthly spend limit. Then create a key for that workspace only: x-companion can't use a key that covers several workspaces.
+- **xAI**: use a team with prepaid credits and a postpaid limit of $0, so the API stops when the credits run out. Restrict the key to the models you use, then check that the panel still shows **Key verified**.
+- **DeepSeek**: the account is prepaid and the API stops when the balance runs out, so keep the balance small.
+- **OpenRouter**: give the key a credit limit with a monthly reset.
 
 ## Requirements
 
@@ -80,7 +92,7 @@ Load `.output/chrome-mv3` as in steps 3 to 6 of [Install](#install). To update, 
 Setup takes one tab in the side panel, plus an optional style guide and project list. Once a provider and key are set, the controls are ready on every reply box:
 
 1. Open x.com and click the x-companion toolbar icon. The side panel opens; it's available only on x.com tabs.
-2. On the **Provider** tab, choose a provider and paste your API key. The key is saved when you paste it, press Enter or leave the field. The panel then verifies the key by loading the provider's model list. Each provider starts with a default model, which you can change.
+2. On the **Provider** tab, choose a provider and paste your API key. A pasted key that starts like the provider's keys (for example `sk-ant-` for Anthropic) is saved right away. Anything else, such as a password or an Anthropic key in the OpenAI field, waits with a warning until you click **Save** or press Enter. OpenAI and DeepSeek keys both start with `sk-`, so the panel can't tell them apart. The panel then verifies the key by loading the provider's model list. Each provider starts with a default model, which you can change. Once saved, the key shows only masked: to change it, click **Replace**.
 3. Optionally, fill in the style guide on the **Style** tab. It has four sections, and each one holds up to 1000 characters:
    - **Persona**: who you are and your main interests.
    - **Audience**: the people you're speaking to and what resonates with them.

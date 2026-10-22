@@ -2,17 +2,17 @@
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { expect, it } from 'vitest';
-import { settingsItem, type Settings } from '@/lib/settings';
+import { DEFAULT_SETTINGS, getSettings, saveSettings, type Settings } from '@/lib/settings';
 import { StyleTab } from './StyleTab';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 it('saves an edited section on unmount, leaving the other sections alone', async () => {
   const settings: Settings = {
-    ...settingsItem.fallback,
+    ...DEFAULT_SETTINGS,
     style: { persona: '', audience: '', voice: 'dry', rules: 'no hashtags' },
   };
-  await settingsItem.setValue(settings);
+  await saveSettings(settings);
   const container = document.body.appendChild(document.createElement('div'));
   const root = createRoot(container);
   act(() => root.render(<StyleTab settings={settings} />));
@@ -26,5 +26,5 @@ it('saves an edited section on unmount, leaving the other sections alone', async
   expect(container.querySelector('#style-persona-count')!.textContent).toBe('9/1000');
 
   await act(async () => root.unmount()); // switching tabs
-  expect((await settingsItem.getValue()).style).toEqual({ ...settings.style, persona: 'indie dev' });
+  expect((await getSettings()).style).toEqual({ ...settings.style, persona: 'indie dev' });
 });

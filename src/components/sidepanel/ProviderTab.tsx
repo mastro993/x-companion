@@ -1,4 +1,6 @@
+import { ShieldAlertIcon } from 'lucide-react';
 import { useEffect } from 'react';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
 import {
   Select,
@@ -14,6 +16,8 @@ import type { ProviderSettings, Settings } from '@/lib/settings';
 import { ApiKeyField } from './ApiKeyField';
 import { ModelPicker } from './ModelPicker';
 import { OtherKeys } from './OtherKeys';
+
+const LIMIT_KEY_URL = 'https://github.com/mastro993/x-companion#limit-what-a-key-can-spend';
 
 const providerItems = PROVIDER_IDS.map((id) => ({ value: id, label: PROVIDERS[id].label }));
 
@@ -42,6 +46,18 @@ export function ProviderTab({ settings }: { settings: Settings }) {
       </Field>
       {active && <ActiveProvider key={active} provider={active} saved={settings.providers[active]} />}
       <OtherKeys settings={settings} />
+      {/* Always on screen: role="alert" would announce it on every visit to the tab. */}
+      <Alert role="note">
+        <ShieldAlertIcon aria-hidden />
+        <AlertTitle>Keys are stored in this browser</AlertTitle>
+        <AlertDescription>
+          They're saved unencrypted in your browser profile. Give each key a spending limit, and use
+          one made only for x-companion.{' '}
+          <a href={LIMIT_KEY_URL} target="_blank" rel="noreferrer">
+            How to limit a key ↗
+          </a>
+        </AlertDescription>
+      </Alert>
     </FieldGroup>
   );
 }
