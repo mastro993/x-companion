@@ -12,13 +12,14 @@ import {
   composerOf,
   type ControlAction,
   controlsOf,
-  findReplyComposers,
+  findComposers,
   getTargetPost,
   injectControls,
   injectedControls,
   readEditor,
   removeInjected,
   renderControls,
+  type RunningAction,
   rootOf,
   setComposerText,
   showAlert,
@@ -34,7 +35,7 @@ export default defineContentScript({
   main(ctx) {
     let ready = false;
     // Keyed on composer roots: X can re-mount the toolbar (and so our controls) mid-request.
-    const busy = new WeakMap<Element, ControlAction>();
+    const busy = new WeakMap<Element, RunningAction>();
     const busyIn = (el: Element) => {
       const root = rootOf(el);
       return (root && busy.get(root)) ?? null;
@@ -62,39 +63,54 @@ export default defineContentScript({
       }
       const wrap = controlsOf(el);
       const c = composerOf(el);
-      if (!action || !wrap) return;
-      const post = c && getTargetPost(c);
-      if (!c || !post) return showAlert(wrap, 'Original post not found. Scroll it into view and retry.');
+      if (!action || !wrap || !c) return;
+      // Refine deletes the draft, then runs Generate: the fresh reply never sees the draft.
+      const run = action === 'refine' ? 'reply' : action;
+      // A new post has no post to answer.
+      const post = run === 'refine-post' ? null : getTargetPost(c);
+      if (run !== 'refine-post' && !post) {
+        return showAlert(wrap, 'Original post not found. Scroll it into view and retry.');
+      }
       const draft = readEditor(c.editor);
-      // The controls lag a frame behind typing: never let Generate overwrite a draft.
+      // The controls lag a frame behind typing: never let Generate overwrite a draft, or refine nothing.
       if ((action === 'reply') !== !draft.trim()) return render(wrap);
-      // Regenerate is Generate over a filled box: the fresh reply never sees the draft.
-      const run = action === 'regenerate' ? { action: 'reply' as const, draft: '' } : { action, draft };
-      if (run.draft.length > MAX_TEXT) return showAlert(wrap, 'This draft is too long to rewrite.');
+      if (run !== 'reply' && draft.length > MAX_TEXT) return showAlert(wrap, 'This draft is too long to rewrite.');
 
       const { root } = c;
       const current = () =>
         wrap.isConnected ? wrap : (injectedControls().find((w) => root.contains(w)) ?? wrap);
-      busy.set(root, action);
+      busy.set(root, run);
       render(wrap);
+      let start = draft; // what the box holds while the model works
       try {
-        const res = await send<ActionResponse | undefined>({ type: 'run-action', post, me: viewerHandle(), ...run });
+        if (action === 'refine') {
+          if (!(await setComposerText(c.editor, ''))) throw new Error("Couldn't clear the reply box. Try again.");
+          start = readEditor(c.editor);
+        }
+        const res = await send<ActionResponse | undefined>(
+          run === 'refine-post'
+            ? { type: 'refine-post', draft: start }
+            : { type: 'run-action', action: run, post: post!, draft: start, me: viewerHandle() },
+        );
         if (!res?.ok) throw new Error(res?.error ?? 'No response from x-companion. Reload the page.');
         // X may have re-mounted the controls, the editor or the focal post during the await.
         // Resolve from the root (closest() includes self): new controls may not be injected yet.
         const now = composerOf(root);
         if (!now?.editor.isConnected) throw new Error('The reply box is gone.');
-        const again = getTargetPost(now);
-        if (!again || again.author !== post.author || again.text !== post.text) {
+        const again = post && getTargetPost(now);
+        if (post && (!again || again.author !== post.author || again.text !== post.text)) {
           throw new Error('The post changed while x-companion was working.');
         }
-        if (readEditor(now.editor) !== draft) {
+        if (readEditor(now.editor) !== start) {
           throw new Error('The reply box changed while x-companion was working. Try again.');
         }
-        if (res.text !== draft && !(await setComposerText(now.editor, res.text))) {
+        if (res.text !== start && !(await setComposerText(now.editor, res.text))) {
           throw new Error("Couldn't fill the reply box. Try again.");
         }
       } catch (e) {
+        // A failed Refine gives the deleted draft back, unless the user has typed since.
+        const ed = composerOf(root)?.editor;
+        if (action === 'refine' && ed?.isConnected && !readEditor(ed).trim()) await setComposerText(ed, draft);
         showAlert(current(), e instanceof Error ? e.message : String(e));
       } finally {
         busy.delete(root);
@@ -112,7 +128,7 @@ export default defineContentScript({
     const scan = () => {
       queued = false;
       if (ctx.isInvalid) return;
-      for (const c of findReplyComposers()) injectControls(c, onClick);
+      for (const c of findComposers()) injectControls(c, onClick);
       injectedControls().forEach(render); // also flips Generate/Rewrite as the box fills or empties
     };
     const queueScan = () => {

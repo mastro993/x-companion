@@ -15,26 +15,36 @@ const CELL = '[data-testid="cellInnerDiv"]';
 const INSIDE_EDITOR = '[contenteditable], .DraftEditor-root, [data-testid$="RichTextInputContainer"]';
 const MARK = 'data-xc-reply';
 const COMPOSE_PATH = '/compose/post';
+const HOME_PATH = '/home';
+const QUOTE_PREVIEW = `[data-testid="attachments"] ${TWEET}`;
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
 interface Composer {
   root: Element;
   editor: HTMLElement;
 }
-interface ReplyComposer extends Composer {
+/** `reply` answers a post; `post` is a new post, which is only ever refined from the user's draft. */
+export type ComposerKind = 'reply' | 'post';
+interface FoundComposer extends Composer {
   submit: HTMLElement;
+  kind: ComposerKind;
 }
-/** What a control runs: an action, or `regenerate`, which runs `reply` without the draft and replaces the box's text. */
-export type ControlAction = ActionId | 'regenerate';
+/**
+ * What a control runs: an action, `refine`, which empties the box and then runs `reply`, or
+ * `refine-post`, which rewrites a new post's draft.
+ */
+export type ControlAction = ActionId | 'refine' | 'refine-post';
+/** What runs while a control is busy: `refine` runs as `reply`. */
+export type RunningAction = Exclude<ControlAction, 'refine'>;
 export interface ControlsState {
   ready: boolean; // setup done
-  busy: ControlAction | null; // running in this composer
-  hasText: boolean; // the reply box has text: offer Regenerate and Rewrite instead of Generate
+  busy: RunningAction | null; // running in this composer
+  hasText: boolean; // the box has text: offer Refine and Rewrite instead of Generate, or enable post Refine
 }
 
-const LABELS: Record<ControlAction, { label: string; busy: string }> = {
+const LABELS: Record<RunningAction, { label: string; busy: string }> = {
   reply: { label: 'Generate', busy: 'Generating…' },
-  regenerate: { label: 'Regenerate', busy: 'Regenerating…' },
+  'refine-post': { label: 'Refine', busy: 'Refining…' },
   polish: { label: 'Polish', busy: 'Polishing…' },
   punchier: { label: 'Punchier', busy: 'Rewriting…' },
   'match-style': { label: 'Match style', busy: 'Rewriting…' },
@@ -45,11 +55,12 @@ const statusId = () => location.pathname.match(/^\/(?:i\/web|[^/]+)\/status\/(\d
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 const follows = (a: Node, b: Node) => !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
 
-/** Composer root: a dialog, or `main` on a status page / the narrow-layout compose page. */
+/** Composer root: a dialog, or `main` on a status page, the narrow-layout compose page or home. */
 export function rootOf(el: Element): Element | null {
+  const { pathname } = location;
   return (
     el.closest('[role="dialog"]') ??
-    (statusId() || location.pathname === COMPOSE_PATH ? el.closest('main') : null)
+    (statusId() || pathname === COMPOSE_PATH || pathname === HOME_PATH ? el.closest('main') : null)
   );
 }
 
@@ -57,7 +68,7 @@ export function rootOf(el: Element): Element | null {
 const needsArticle = (root: Element) =>
   root.matches('[role="dialog"]') || location.pathname === COMPOSE_PATH;
 
-/** Post being replied to; null = not a reply composer (new post, quote, home). */
+/** Post being replied to; null = not a reply composer (new post, quote). */
 function targetArticle({ root, editor }: Composer): HTMLElement | null {
   const articles = [...root.querySelectorAll<HTMLElement>(TWEET)];
   if (needsArticle(root)) {
@@ -85,16 +96,24 @@ function nearest(from: Element, sel: string, stop: Element): HTMLElement | null 
   return null;
 }
 
-export function findReplyComposers(): ReplyComposer[] {
+/** null = a quote composer, or a status page whose focal post isn't there. */
+function kindOf(c: Composer): ComposerKind | null {
+  if (targetArticle(c)) return 'reply';
+  const fresh = needsArticle(c.root) || location.pathname === HOME_PATH;
+  return fresh && !c.root.querySelector(QUOTE_PREVIEW) ? 'post' : null;
+}
+
+/** Reply and new-post composers. A thread's parts after the first share its root and are skipped. */
+export function findComposers(): FoundComposer[] {
   const seen = new Set<Element>();
-  const out: ReplyComposer[] = [];
+  const out: FoundComposer[] = [];
   for (const editor of document.querySelectorAll<HTMLElement>(EDITOR)) {
     const root = rootOf(editor);
-    if (!root || seen.has(root)) continue; // home composer; thread parts after the first
+    if (!root || seen.has(root)) continue;
     seen.add(root);
-    if (needsArticle(root) && !targetArticle({ root, editor })) continue; // new-post / quote
+    const kind = kindOf({ root, editor });
     const submit = nearest(editor, SUBMIT, root);
-    if (submit?.parentElement) out.push({ root, editor, submit });
+    if (kind && submit?.parentElement) out.push({ root, editor, submit, kind });
   }
   return out;
 }
@@ -122,24 +141,28 @@ const REFRESH =
 const SETUP_HINT = 'x-companion: finish setup in the side panel';
 
 /**
- * Inserts our controls before X's Reply button: a Generate pill, a Regenerate icon, and a Rewrite
- * pill whose menu holds the other actions. `onClick` gets the clicked control and its action; null
- * means the Rewrite pill was clicked while its menu is off (setup unfinished or busy).
- * Idempotent: returns null if already there.
+ * Inserts our controls before X's Reply or Post button. A reply composer gets a Generate pill, a
+ * Refine icon, and a Rewrite pill whose menu holds the other actions; a new post gets one Refine
+ * pill. `onClick` gets the clicked control and its action; null means the Rewrite pill was clicked
+ * while its menu is off (setup unfinished or busy).
+ * Idempotent: returns null if already there. Swaps controls of the wrong kind, e.g. injected
+ * before the dialog's original post rendered.
  */
 export function injectControls(
-  c: ReplyComposer,
+  c: FoundComposer,
   onClick: (el: HTMLElement, action: ControlAction | null) => void,
 ): HTMLElement | null {
   const host = c.submit.parentElement!;
-  if (host.querySelector(`[${MARK}]`) || host.closest(INSIDE_EDITOR)) return null;
+  if (host.closest(INSIDE_EDITOR)) return null;
+  const old = host.querySelector(`[${MARK}]`);
+  if (old?.getAttribute(MARK) === c.kind) return null;
+  old?.remove();
 
   const wrap = document.createElement('span');
   wrap.className = 'xc-reply';
-  wrap.setAttribute(MARK, '');
+  wrap.setAttribute(MARK, c.kind);
   // ponytail: copied once, so a live theme switch leaves them stale until X re-mounts the composer
   wrap.style.color = getComputedStyle(c.editor).color; // X's theme text colour, no theme sniffing
-  const page = getComputedStyle(document.body).backgroundColor; // X paints its theme on body
 
   const button = (className: string, action: ControlAction | null, ...content: Node[]) => {
     const btn = document.createElement('button');
@@ -158,19 +181,25 @@ export function injectControls(
     return btn;
   };
 
-  const menu = document.createElement('div');
-  menu.className = 'xc-menu';
-  menu.popover = 'auto';
-  if (page !== 'rgba(0, 0, 0, 0)') menu.style.backgroundColor = page;
-  for (const action of ACTIONS.filter((a) => a !== 'reply')) {
-    const item = button('xc-menu-item', action, document.createTextNode(LABELS[action].label));
-    item.addEventListener('click', () => menu.hidePopover());
-    menu.append(item);
+  if (c.kind === 'post') {
+    wrap.append(button('xc-reply-btn', 'refine-post', icon(SPARKLE), document.createElement('span')));
+  } else {
+    const menu = document.createElement('div');
+    menu.className = 'xc-menu';
+    menu.popover = 'auto';
+    const page = getComputedStyle(document.body).backgroundColor; // X paints its theme on body
+    if (page !== 'rgba(0, 0, 0, 0)') menu.style.backgroundColor = page;
+    for (const action of ACTIONS.filter((a) => a !== 'reply')) {
+      const item = button('xc-menu-item', action, document.createTextNode(LABELS[action].label));
+      item.addEventListener('click', () => menu.hidePopover());
+      menu.append(item);
+    }
+    const generate = button('xc-reply-btn', 'reply', icon(SPARKLE), document.createElement('span'));
+    const refine = button('xc-reply-btn xc-reply-btn--icon', 'refine', icon(REFRESH));
+    refine.setAttribute('aria-label', 'Refine reply with x-companion'); // the icon has no visible text
+    const rewrite = button('xc-reply-btn', null, icon(SPARKLE), document.createElement('span'), icon(CHEVRON));
+    wrap.append(generate, refine, rewrite, menu);
   }
-  const generate = button('xc-reply-btn', 'reply', icon(SPARKLE), document.createElement('span'));
-  const regenerate = button('xc-reply-btn xc-reply-btn--icon', 'regenerate', icon(REFRESH));
-  const rewrite = button('xc-reply-btn', null, icon(SPARKLE), document.createElement('span'), icon(CHEVRON));
-  wrap.append(generate, regenerate, rewrite, menu);
 
   // ponytail: forces a row on react-native-web column hosts (compact detail composer); revisit if X's layout shifts
   if (getComputedStyle(host).flexDirection.startsWith('column')) {
@@ -181,37 +210,52 @@ export function injectControls(
   return wrap;
 }
 
+const attr = (el: Element, name: string, value: string | false) =>
+  value === false ? el.removeAttribute(name) : el.setAttribute(name, value);
+
+/** Only when it changed: a text write is a childList mutation, which would queue another scan. */
+function setLabel(btn: Element, label: string) {
+  const span = btn.querySelector('span')!;
+  if (span.textContent !== label) span.textContent = label;
+}
+
+function setState(el: Element, { ready, busy }: ControlsState) {
+  attr(el, 'aria-busy', !!busy && 'true');
+  // aria-disabled rather than `disabled`: a setup click must still fire to open the side panel.
+  attr(el, 'aria-disabled', !ready && 'true');
+}
+
 /**
- * Shows Generate on an empty box, and Regenerate and Rewrite on a filled one. Rewrites the label
- * only when it changed: a text write is a childList mutation, which would queue another scan.
+ * Reply composer: Generate on an empty box, and Refine and Rewrite on a filled one. New post:
+ * Refine, disabled until the box has a draft to refine.
  */
-export function renderControls(wrap: Element, { ready, busy, hasText }: ControlsState): void {
-  const [generate, regenerate, rewrite] = wrap.querySelectorAll<HTMLButtonElement>(':scope > .xc-reply-btn');
+export function renderControls(wrap: Element, state: ControlsState): void {
+  const { ready, busy, hasText } = state;
+  if (wrap.getAttribute(MARK) === 'post') {
+    const btn = wrap.querySelector<HTMLButtonElement>(':scope > .xc-reply-btn');
+    if (!btn) return;
+    setLabel(btn, busy ? LABELS['refine-post'].busy : LABELS['refine-post'].label);
+    attr(btn, 'aria-label', `${busy ? 'Refining' : 'Refine'} post with x-companion`);
+    setState(btn, state);
+    btn.disabled = ready && !busy && !hasText; // a setup click must still open the side panel
+    attr(btn, 'title', !ready && SETUP_HINT);
+    return;
+  }
+
+  const [generate, refine, rewrite] = wrap.querySelectorAll<HTMLButtonElement>(':scope > .xc-reply-btn');
   const menu = wrap.querySelector<HTMLElement>('.xc-menu');
-  if (!generate || !regenerate || !rewrite || !menu) return;
+  if (!generate || !refine || !rewrite || !menu) return;
   const rewriting = busy ? busy !== 'reply' : hasText;
   const btn = rewriting ? rewrite : generate;
   generate.hidden = rewriting;
-  regenerate.hidden = rewrite.hidden = !rewriting;
+  refine.hidden = rewrite.hidden = !rewriting;
 
-  // The pill names whatever runs, Regenerate included: the icon has no text of its own.
-  const label = busy ? LABELS[busy].busy : rewriting ? 'Rewrite' : LABELS.reply.label;
-  const span = btn.querySelector('span')!;
-  if (span.textContent !== label) span.textContent = label; // a text write is a childList mutation
-  const attr = (el: Element, name: string, value: string | false) =>
-    value === false ? el.removeAttribute(name) : el.setAttribute(name, value);
-  const running = busy === 'regenerate' ? 'Regenerating reply' : rewriting ? 'Rewriting draft' : 'Generating reply';
-  const verb = busy ? running : rewriting ? 'Rewrite draft' : 'Generate reply';
+  setLabel(btn, busy ? LABELS[busy].busy : rewriting ? 'Rewrite' : LABELS.reply.label);
+  const verb = rewriting ? (busy ? 'Rewriting draft' : 'Rewrite draft') : busy ? 'Generating reply' : 'Generate reply';
   attr(btn, 'aria-label', `${verb} with x-companion`);
-  // Keyboard users keep focus on the icon while it runs: its own name must say so.
-  attr(regenerate, 'aria-label', `${busy === 'regenerate' ? 'Regenerating' : 'Regenerate'} reply with x-companion`);
-  for (const el of [btn, regenerate]) {
-    attr(el, 'aria-busy', !!busy && 'true');
-    // aria-disabled rather than `disabled`: a setup click must still fire to open the side panel.
-    attr(el, 'aria-disabled', !ready && 'true');
-  }
+  for (const el of [btn, refine]) setState(el, state);
   attr(btn, 'title', !ready && SETUP_HINT);
-  regenerate.title = ready ? LABELS.regenerate.label : SETUP_HINT; // the icon has no visible text
+  refine.title = ready ? 'Refine' : SETUP_HINT; // the icon has no visible text
 
   // The invoker is also the menu's implicit anchor and is exempt from its light dismiss.
   const armed = ready && !busy && rewriting;
@@ -437,7 +481,7 @@ function selectAll(ed: HTMLElement) {
   document.execCommand('selectAll'); // the Range alone needs a live caret, else inserts append
 }
 
-/** Replaces the composer text. Never submits. Returns false if the text could not be verified. */
+/** Replaces the composer text; "" empties it. Never submits. Returns false if the text could not be verified. */
 export async function setComposerText(ed: HTMLElement, text: string): Promise<boolean> {
   const before = readEditor(ed);
   const done = () => norm(readEditor(ed)) === norm(text);
@@ -448,16 +492,23 @@ export async function setComposerText(ed: HTMLElement, text: string): Promise<bo
 
   selectAll(ed);
   await sleep(120); // Draft syncs its selection on selectionchange, a later task
-  const dt = new DataTransfer();
-  dt.setData('text/plain', text); // not text/html: Draft prefers it and collapses newlines
-  const paste = new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true });
-  ed.dispatchEvent(paste);
+  let write: Event;
+  if (text) {
+    const dt = new DataTransfer();
+    dt.setData('text/plain', text); // not text/html: Draft prefers it and collapses newlines
+    write = new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true });
+  } else {
+    // Draft ignores an empty paste, but deletes the selection on Backspace (it reads keyCode).
+    write = new KeyboardEvent('keydown', { key: 'Backspace', keyCode: 8, bubbles: true, cancelable: true });
+  }
+  ed.dispatchEvent(write);
   // Draft calls preventDefault() before anything else, so its handler ran: never stack a second write.
-  if (paste.defaultPrevented || readEditor(ed) !== before) return settle();
+  if (write.defaultPrevented || readEditor(ed) !== before) return settle();
 
-  // Nobody handled the paste (narrow-layout textarea, non-Draft editor): insertText is reliable there.
-  // insertText targets the focus, not `ed`: a detached or blurred editor would write elsewhere.
+  // Nobody handled the event (narrow-layout textarea, non-Draft editor): execCommand is reliable there.
+  // It targets the focus, not `ed`: a detached or blurred editor would write elsewhere.
   if (document.activeElement !== ed) return false;
-  document.execCommand('insertText', false, text);
+  if (text) document.execCommand('insertText', false, text);
+  else document.execCommand('delete');
   return settle();
 }

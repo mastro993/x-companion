@@ -96,9 +96,10 @@ export function parseRequest(msg: unknown): BackgroundRequest | null {
   const { type, action, post, draft, me } = msg as Record<string, unknown>;
   if (type === 'get-status' || type === 'open-side-panel') return { type };
   // A cut draft would come back rewritten without its tail, so an over-long one is refused, not capped.
-  if (type !== 'run-action' || !isAction(action) || !isString(draft) || draft.length > MAX_TEXT) {
-    return null;
-  }
+  if (!isString(draft) || draft.length > MAX_TEXT) return null;
+  // A post is only ever refined, never written from nothing.
+  if (type === 'refine-post') return draft.trim() ? { type, draft } : null;
+  if (type !== 'run-action' || !isAction(action)) return null;
   if (!isString(me) || !/^(?:@\w{1,15})?$/.test(me)) return null;
   const parsed = parseTarget(post);
   return parsed && { type, action, post: parsed, draft, me };

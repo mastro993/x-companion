@@ -19,7 +19,7 @@ export interface TargetPost extends Post {
   later: Post[]; // its author's posts right below it: the rest of their thread
 }
 
-/** Composer actions. `reply` drafts into an empty box; the others rewrite the box's text. */
+/** Reply composer actions. `reply` drafts into an empty box; the others rewrite the box's text. */
 export const ACTIONS = ['reply', 'polish', 'punchier', 'match-style'] as const;
 export type ActionId = (typeof ACTIONS)[number];
 
@@ -30,7 +30,8 @@ export const MAX_TEXT = 8000;
 export type BackgroundRequest =
   | { type: 'get-status' }
   | { type: 'open-side-panel' }
-  | { type: 'run-action'; action: ActionId; post: TargetPost; draft: string; me: string };
+  | { type: 'run-action'; action: ActionId; post: TargetPost; draft: string; me: string }
+  | { type: 'refine-post'; draft: string }; // a new post's draft, never empty
 
 /** background -> content script (pushed via tabs.sendMessage when settings change) */
 export type ContentPush = { type: 'status'; ready: boolean };

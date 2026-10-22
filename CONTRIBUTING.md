@@ -93,12 +93,12 @@ x-companion has three parts that talk through extension messages, plus the provi
 
 - **Background service worker** (`src/entrypoints/background.ts`):
   - Enables the side panel and toolbar icon per tab, on x.com only. The manifest has no global `side_panel` entry, so the panel never follows you to other sites.
-  - Answers the content script: it reports the ready status, opens the side panel and runs actions (generate or rewrite a reply). Regenerate reaches it as a plain generate, without the draft.
+  - Answers the content script: it reports the ready status, opens the side panel and runs actions (generate or rewrite a reply, refine a new post). Reply Refine reaches it as a plain generate, after the content script empties the box. Post Refine is its own `refine-post` request: just the draft, which the background refuses when empty.
   - Calls the provider API directly, with a 60s timeout. A keepalive holds the service worker open during long calls.
   - Pushes ready-status changes to open x.com tabs.
 - **Content script** (`src/entrypoints/x.content/`, logic in `src/lib/x-dom.ts`):
-  - Watches the page for reply composers: the reply dialog, the inline composer on a post page and the narrow-layout `/compose/post` page.
-  - Inserts the controls before X's **Reply** button: **Generate** on an empty box, then the **Regenerate** icon and **Rewrite** with its menu once the box has text. New-post, quote and home composers get no controls.
+  - Watches the page for composers. Reply composers: the reply dialog, the inline composer on a post page and the narrow-layout `/compose/post` page. New-post composers: the home box, the **Post** dialog and its narrow-layout page. A composer is a reply when the post it answers is there, and a new post when it has none and no quoted post.
+  - Inserts the controls before X's **Reply** button: **Generate** on an empty box, then the **Refine** icon and **Rewrite** with its menu once the box has text. Before the **Post** button, a single **Refine** pill, disabled while the box is empty. Quote composers get no controls. If a composer turns out to be the other kind once X finishes rendering, its controls are swapped.
   - The Rewrite menu is a native popover with CSS anchor positioning, so it sits in the top layer and X's overflow can't clip it.
   - Reads the target post: the author, the text with emoji, photos and video thumbnails with their alt text, the quoted post and whether **Show more** cut it off.
   - On a post's page, also reads the conversation around it: the posts above the target, and its author's run of posts right below it. For a reply below the main post, the posts above are the main post, the ones above it and, inside the main author's own thread, that thread's earlier parts. A timeline isn't a conversation, so it reads none there.
@@ -120,10 +120,11 @@ x-companion has three parts that talk through extension messages, plus the provi
   - The host list includes `https://api.typesafe.ai/*` for the TypeSafe route, because TypeSafe's CORS rules reject extension origins.
 - **Prompts** (`src/lib/prompts/`):
   - One file per action. Each exports a `PromptBuilder`: a function from `PromptConfig` (the context, meaning the post with its conversation and the reply box text, plus the style guide and projects) to a system message, a user message and the pictures to attach.
+  - `refine-post.ts` is the new-post prompt, a `PostPromptBuilder`: it gets only the draft, the style guide and projects, since there's no post to reply to. It isn't in `PROMPTS`, because it isn't a reply composer action.
   - `PROMPTS` in `index.ts` maps each action in `ACTIONS` (`src/lib/messages.ts`) to its prompt. To add an action, add its ID there, write its prompt file and register it, then give it a label in `src/lib/x-dom.ts`.
   - The rewrite actions share `rewrite.ts`, so each of their files holds only its instruction. The shared blocks (style guide, projects, the post with its conversation and quoted post, image markers, delimiter stripping) live in `shared.ts`.
   - Each post is its own tagged block: `<earlier>` posts, then the target `<post>`, then `<later>` posts, each with any `<quote>` inside. Media show as `[Image N]` or `[Video N]` markers. Up to 8 pictures are attached, numbered in priority order: the target's, its quote's, then the conversation's, nearest first.
-  - A fresh reply is capped at 280 characters. A rewrite keeps that cap, or the draft's length if it's longer.
+  - A fresh reply is capped at 280 characters. A rewrite and a post refine keep that cap, or the draft's length if it's longer.
 
 ## Project structure
 
@@ -206,21 +207,24 @@ You need an X account and an API key for at least one provider. Use `pnpm dev`, 
    - On the **Projects** tab, add a project. Its **Name** field gets focus. Fill in the fields: the card shows **Saved** shortly after you stop typing. Switch tabs and back: the project kept its text. **Remove** asks to confirm, and **Cancel** keeps it. **Add project** turns off at 10 projects.
 3. **Placement**:
    - **Generate** appears left of **Reply** in the reply dialog (the reply icon under a timeline post) and in the inline reply box on a post's own page.
-   - Type a character: **Generate** becomes **Rewrite**, with the **Regenerate** icon on its left. Delete it: **Generate** comes back alone.
-   - No controls appear in the home “What's happening?” box, the new-post dialog or the quote dialog.
+   - Type a character: **Generate** becomes **Rewrite**, with the **Refine** icon on its left. Delete it: **Generate** comes back alone.
+   - The home “What's happening?” box and the **Post** dialog show one **Refine** pill left of **Post**, greyed and unclickable while the box is empty. Type a character: it turns on.
+   - No controls appear in the quote dialog.
 4. **Not ready**:
    - Remove the active provider's API key. The controls turn grey.
-   - Click **Generate**, then type something and click **Regenerate** and **Rewrite**. Each opens the side panel, and no menu opens.
+   - Click **Generate**, then type something and click **Refine** and **Rewrite**. Each opens the side panel, and no menu opens.
    - Paste the key again. The controls become active without a page reload.
 5. **Generate**:
    - Click **Generate**. It shows “Generating…”, then the draft appears in the reply box and the control becomes **Rewrite**.
    - Confirm that X's **Reply** button is enabled, that you can edit the text, and that nothing was posted.
    - Type into the box while it shows “Generating…”. The result is dropped with a message, and your text stays.
-   - With text in the box, click **Regenerate**. The Rewrite pill shows “Regenerating…”, then a fresh reply replaces the text.
+   - With text in the box, click **Refine**. The box empties and **Generate** shows “Generating…”, then a fresh reply fills the box.
+   - Go offline and click **Refine**. The box empties, then your text comes back with an error message.
 6. **Rewrite**:
    - Click **Rewrite**. A menu with **Polish**, **Punchier** and **Match style** opens under it, or above it when there's no room below. Clicking outside it or pressing Escape closes it.
    - Pick each action on a multi-line draft. The pill shows its progress (“Polishing…”, “Rewriting…”), then the rewrite replaces the draft and keeps its line breaks.
    - **Polish** on a draft that needs no fixes leaves the box as it was.
+   - In the home box, write a rough post and click **Refine**. It shows “Refining…”, then the refined post replaces the draft and nothing was posted. The provider request holds only a `<draft>` block, with no `<post>`.
 7. **Errors**: use a bad key, or go offline, and run an action. A short message appears next to the controls for about 6s.
 8. **Context**: open the service worker's DevTools (see [Debug the extension](#debug-the-extension)) on its **Network** tab, generate once in each case below, and check the user message of the provider request:
    - On the page of a post in the middle of a thread, the posts above it appear as `<earlier>` blocks, and its author's next posts as `<later>` blocks.

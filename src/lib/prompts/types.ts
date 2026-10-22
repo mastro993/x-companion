@@ -21,11 +21,18 @@ export interface PromptContext {
   me: string; // the user's "@handle", or "" when the page didn't show it
 }
 
-/** Everything a prompt can draw on. Every builder gets all of it and uses what it needs. */
-export interface PromptConfig {
-  context: PromptContext;
+/** The user's style guide and projects, from the side panel. */
+export interface Profile {
   style: StyleGuide;
   projects: Project[];
 }
 
+/** Everything a reply prompt can draw on. Every builder gets all of it and uses what it needs. */
+export interface PromptConfig extends Profile {
+  context: PromptContext;
+}
+
 export type PromptBuilder = (config: PromptConfig) => Prompt;
+
+/** A new post's prompt: the user's draft, never empty. */
+export type PostPromptBuilder = (config: Profile & { draft: string }) => Prompt;

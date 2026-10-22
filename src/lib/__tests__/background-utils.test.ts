@@ -81,6 +81,21 @@ describe('parseRequest', () => {
     expect(parseRequest(msg)).toBeNull();
   });
 
+  it('takes a new post draft to refine, and nothing else from it', () => {
+    expect(parseRequest({ type: 'refine-post', draft: ' my take ', post, me: '@a' })).toEqual({
+      type: 'refine-post',
+      draft: ' my take ',
+    });
+  });
+
+  it.each([
+    ['empty draft: a post is never written from nothing', { type: 'refine-post', draft: ' \n ' }],
+    ['missing draft', { type: 'refine-post' }],
+    ['over-long draft', { type: 'refine-post', draft: 'd'.repeat(8001) }],
+  ])('rejects a refine-post with %s', (_, msg) => {
+    expect(parseRequest(msg)).toBeNull();
+  });
+
   it('caps field lengths and keeps the thread nearest the post', () => {
     const long = {
       author: 'a'.repeat(150),

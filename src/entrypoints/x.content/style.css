@@ -28,7 +28,7 @@
 .xc-reply-btn[hidden] {
   display: none;
 }
-/* Regenerate: icon only, a circle the pills' height. */
+/* Refine: icon only, a circle the pills' height. */
 .xc-reply-btn--icon {
   justify-content: center;
   width: 36px;
@@ -43,7 +43,7 @@
 .xc-reply-btn svg + span + svg {
   margin-inline: -4px -6px;
 }
-.xc-reply-btn:hover {
+.xc-reply-btn:enabled:hover {
   background-color: color-mix(in srgb, currentColor 10%, transparent);
 }
 .xc-reply-btn:focus-visible {
@@ -53,6 +53,11 @@
 /* Setup incomplete: greyed but still clickable (opens the side panel). */
 .xc-reply-btn[aria-disabled='true'] {
   opacity: 0.5;
+}
+/* A new post's Refine with no draft yet. */
+.xc-reply-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 .xc-reply-btn[aria-busy='true'] {
   opacity: 0.7;
