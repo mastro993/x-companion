@@ -5,7 +5,7 @@ import { expect, it, vi } from 'vitest';
 import { listModels } from '@/lib/llm';
 import { PROVIDERS } from '@/lib/providers';
 import type { Settings } from '@/lib/settings';
-import { ProviderTab } from './ProviderTab';
+import { ProviderTab } from '../ProviderTab';
 
 vi.mock('@/lib/llm', () => ({ listModels: vi.fn() }));
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;

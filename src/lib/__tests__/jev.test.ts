@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
-import { decide, type JevConfig } from './jev';
+import { decide, type JevConfig } from '../jev';
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
 

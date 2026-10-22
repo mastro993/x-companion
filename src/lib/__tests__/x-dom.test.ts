@@ -13,7 +13,7 @@ import {
   showAlert,
   trackReplySource,
   viewerHandle,
-} from './x-dom';
+} from '../x-dom';
 
 // Hand-written minimal fixtures mimicking X's 2026 DOM (testids, Draft.js blocks, #layers dialogs).
 const editor = (testid = 'tweetTextarea_0') => `

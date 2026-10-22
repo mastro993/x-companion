@@ -3,7 +3,7 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { expect, it } from 'vitest';
 import { DEFAULT_SETTINGS, getSettings, saveSettings, type Settings } from '@/lib/settings';
-import { ProjectsTab } from './ProjectsTab';
+import { ProjectsTab } from '../ProjectsTab';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 

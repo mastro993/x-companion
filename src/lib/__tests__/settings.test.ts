@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fakeBrowser } from 'wxt/testing/fake-browser';
-import { PROVIDERS } from './providers';
-import { getSettings, getStatus, saveSettings, settingsItem, type Settings, watchReady } from './settings';
+import { PROVIDERS } from '../providers';
+import { getSettings, getStatus, saveSettings, settingsItem, type Settings, watchReady } from '../settings';
 
 const model = PROVIDERS.openai.defaultModel;
 const style = { persona: '', audience: '', voice: '', rules: '' };

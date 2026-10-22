@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { PROVIDERS } from '@/lib/providers';
-import { maskKey, statusHint } from './format';
+import { maskKey, statusHint } from '../format';
 
 describe('maskKey', () => {
   it.each([

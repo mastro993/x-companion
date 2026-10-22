@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { PROVIDERS } from '@/lib/providers';
 import type { Settings } from '@/lib/settings';
-import { setProviderKey } from './use-settings';
+import { setProviderKey } from '../use-settings';
 
 describe('setProviderKey', () => {
   const custom = { id: 'gpt-x', label: 'GPT X', lowEffort: false };
