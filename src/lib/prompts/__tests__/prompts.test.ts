@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { ACTIONS, type Post, type PostImage, type TargetPost } from '../messages';
-import type { Project, StyleGuide } from '../settings';
-import { PROMPTS } from '.';
-import { replyPrompt } from './reply';
-import { cleanReply } from './shared';
-import type { PromptConfig, PromptContext } from './types';
+import { ACTIONS, type Post, type PostImage, type TargetPost } from '../../messages';
+import type { Project, StyleGuide } from '../../settings';
+import { PROMPTS } from '..';
+import { replyPrompt } from '../reply';
+import { cleanReply } from '../shared';
+import type { PromptConfig, PromptContext } from '../types';
 
 const post: TargetPost = {
   author: '@jack',

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { generateText, listModels, type LlmConfig } from './llm';
-import type { ProviderId } from './providers';
+import { generateText, listModels, type LlmConfig } from '../llm';
+import type { ProviderId } from '../providers';
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
 

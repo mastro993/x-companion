@@ -175,11 +175,11 @@ Unit tests cover the logic, but they never call a real provider or load the real
 Run `pnpm compile`, `pnpm test` and `pnpm build` before every commit. The CI workflow runs the same three checks on every pull request and every push to `main`:
 
 ```sh
-pnpm test                                # all unit tests, once
-pnpm vitest                              # watch mode
-pnpm vitest run src/lib/x-dom.test.ts    # a single file
-pnpm compile                             # TypeScript type check
-pnpm build                               # catches bundling and manifest errors
+pnpm test                                          # all unit tests, once
+pnpm vitest                                        # watch mode
+pnpm vitest run src/lib/__tests__/x-dom.test.ts    # a single file
+pnpm compile                                       # TypeScript type check
+pnpm build                                         # catches bundling and manifest errors
 ```
 
 The unit tests use Vitest, and the DOM tests run in happy-dom. They cover:

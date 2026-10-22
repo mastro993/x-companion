@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isXUrl, parseRequest, safeError } from './background-utils';
+import { isXUrl, parseRequest, safeError } from '../background-utils';
 
 describe('isXUrl', () => {
   it.each<[string | undefined, boolean]>([
