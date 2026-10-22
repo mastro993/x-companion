@@ -1,4 +1,4 @@
-import { MAX_REPLY_CHARS, materialRules, postBlock, profile } from './shared';
+import { MAX_CHARS, materialRules, postBlock, profile } from './shared';
 import type { PromptBuilder } from './types';
 
 /** Writes a reply from scratch. */
@@ -8,7 +8,7 @@ export const replyPrompt: PromptBuilder = ({ context: { post, me }, ...config })
     system: `You ghostwrite replies on X as the user, in their voice. Write one reply to the post in <post>.
 Rules:
 - Same language as the post, unless the user's <rules> say otherwise.
-- At most ${MAX_REPLY_CHARS} characters; shorter is usually better.
+- At most ${MAX_CHARS} characters; shorter is usually better.
 - Plain text only. Output just the reply: no quotes around it, no preamble, no labels, no markdown.
 - No hashtags or emojis unless the user's style guide asks for them.
 - Don't start with the author's @handle; X adds it.

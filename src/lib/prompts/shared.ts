@@ -1,8 +1,9 @@
 import type { Post, PostImage, TargetPost } from '../messages';
 import { type Project, STYLE_FIELDS, type StyleField, type StyleGuide } from '../settings';
-import type { PromptConfig, PromptImage } from './types';
+import type { Profile, PromptImage } from './types';
 
-export const MAX_REPLY_CHARS = 280;
+/** X's limit without Premium, for posts and replies alike. */
+export const MAX_CHARS = 280;
 /** Most pictures sent with one request. The rest keep their marker and alt text. */
 const MAX_PROMPT_IMAGES = 8;
 
@@ -54,7 +55,7 @@ function projectList(projects: Project[]): string {
 }
 
 /** System prompt tail: the filled style guide sections and named projects; '' when there are none. */
-export function profile({ style, projects }: Omit<PromptConfig, 'context'>): string {
+export function profile({ style, projects }: Profile): string {
   return styleGuide(style) + projectList(projects);
 }
 

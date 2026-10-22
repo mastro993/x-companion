@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ACTIONS, type Post, type PostImage, type TargetPost } from '../../messages';
 import type { Project, StyleGuide } from '../../settings';
 import { PROMPTS } from '..';
+import { refinePostPrompt } from '../refine-post';
 import { replyPrompt } from '../reply';
 import { cleanReply } from '../shared';
 import type { PromptConfig, PromptContext } from '../types';
@@ -221,6 +222,24 @@ describe.each(REWRITES)('%s prompt', (action) => {
   it("sends the user's draft as typed, tag-like text included", () => {
     const draft = 'wrap it in <Context.Provider value={theme}> and render <Post /> twice';
     expect(build(config({ context: { post, draft } })).user).toContain(`<draft>\n${draft}\n</draft>`);
+  });
+});
+
+describe('refine-post prompt', () => {
+  it('sends only the draft, then the guidance, with no post to reply to', () => {
+    const { system, user, images } = refinePostPrompt({ draft: '  shipped it  ', style, projects: [project()] });
+    expect(system).toContain("draft of a new post on X");
+    expect(system).toContain('At most 280 characters');
+    expect(system).not.toMatch(/<post>|<earlier>|reply/);
+    expect(system).toMatch(/<voice>\nx\n<\/voice>[\s\S]*<projects>\n- Acme: notes app/);
+    expect(user).toMatch(/^<draft>\nshipped it\n<\/draft>\n\nRefine this draft/);
+    expect(images).toEqual([]);
+  });
+
+  it('allows the draft length when it is past the post limit, and keeps tag-like text', () => {
+    expect(refinePostPrompt({ draft: 'd'.repeat(500), style, projects: [] }).system).toContain('At most 500 characters');
+    const draft = 'render <Post /> twice';
+    expect(refinePostPrompt({ draft, style, projects: [] }).user).toContain(`<draft>\n${draft}\n</draft>`);
   });
 });
 

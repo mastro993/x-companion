@@ -1,4 +1,4 @@
-import { MAX_REPLY_CHARS, materialRules, postBlock, profile } from './shared';
+import { MAX_CHARS, materialRules, postBlock, profile } from './shared';
 import type { PromptBuilder } from './types';
 
 /** Frame for the actions that rewrite the reply box's text; `instruction` says how. */
@@ -7,7 +7,7 @@ export function rewritePrompt(instruction: string): PromptBuilder {
     // The user's own text, sent as typed: stripping tag-like text (<Context.Provider>) would lose it.
     const text = draft.trim();
     // A draft already past the reply limit (X Premium) may stay that long.
-    const limit = Math.max(MAX_REPLY_CHARS, text.length);
+    const limit = Math.max(MAX_CHARS, text.length);
     const material = postBlock(post);
     return {
       system: `You edit the user's draft reply on X, in their voice. The draft in <draft> replies to the post in <post>.

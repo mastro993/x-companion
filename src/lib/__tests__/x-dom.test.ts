@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   composerOf,
   type ControlsState,
-  findReplyComposers,
+  findComposers,
   getTargetPost,
   injectControls,
   injectedControls,
@@ -47,7 +47,7 @@ function page(path: string, layers: string, main = '') {
   history.replaceState(null, '', path);
   document.body.innerHTML = `<div id="layers">${layers}</div><div><main>${main}</main></div>`;
 }
-const scan = () => findReplyComposers().map((c) => injectControls(c, () => {}));
+const scan = () => findComposers().map((c) => injectControls(c, () => {}));
 
 // happy-dom has the popover attribute but not its methods.
 HTMLElement.prototype.hidePopover = vi.fn();
@@ -56,7 +56,7 @@ afterEach(() => {
   document.body.innerHTML = '';
 });
 
-describe('findReplyComposers + injectControls', () => {
+describe('findComposers + injectControls', () => {
   it('reply dialog: injects before Reply, targets the original above the editor', () => {
     page(
       '/compose/post',
@@ -99,13 +99,37 @@ describe('findReplyComposers + injectControls', () => {
 
   it.each([
     ['new-post dialog', '/compose/post', `<div role="dialog">${editor()}${toolbar('tweetButton')}</div>`, ''],
+    ['narrow-layout new post page', '/compose/post', '', editor() + toolbar('tweetButton')],
+    ['home composer', '/home', '', editor() + toolbar('tweetButtonInline') + tweet('bob', '9', text('Feed'))],
+  ])('%s: a new post, with one Refine pill before Post', (_, path, layers, main) => {
+    page(path, layers, main);
+    const [c, ...rest] = findComposers();
+    expect(rest).toEqual([]);
+    expect(c!.kind).toBe('post');
+    const wrap = injectControls(c!, () => {})!;
+    expect(wrap.nextElementSibling).toBe(c!.submit);
+    expect(wrap.querySelectorAll('button')).toHaveLength(1);
+    expect(wrap.querySelector('.xc-menu')).toBeNull();
+  });
+
+  it('swaps new-post controls for reply controls once the original post renders', () => {
+    page('/compose/post', `<div role="dialog">${editor()}${toolbar('tweetButton')}</div>`);
+    const [post] = scan();
+    expect(post!.getAttribute('data-xc-reply')).toBe('post');
+    document.querySelector('[role="dialog"]')!.insertAdjacentHTML('afterbegin', tweet('alice', '111', text('Original')));
+    const [reply] = scan();
+    expect(reply!.getAttribute('data-xc-reply')).toBe('reply');
+    expect(post!.isConnected).toBe(false);
+    expect(injectedControls()).toEqual([reply]);
+  });
+
+  it.each([
     [
       'quote dialog',
       '/compose/post',
       `<div role="dialog">${editor()}<div data-testid="attachments">${tweet('bob', '9', text('Quoted'))}</div>${toolbar('tweetButton')}</div>`,
       '',
     ],
-    ['home composer', '/home', '', editor() + toolbar('tweetButtonInline') + tweet('bob', '9', text('Feed'))],
     [
       'home composer under a photo viewer',
       '/bob/status/9/photo/1',
@@ -114,7 +138,7 @@ describe('findReplyComposers + injectControls', () => {
     ],
   ])('%s: no button', (_, path, layers, main) => {
     page(path, layers, main);
-    expect(findReplyComposers()).toEqual([]);
+    expect(findComposers()).toEqual([]);
   });
 
   it('is idempotent and re-injects after X drops our node', () => {
@@ -146,13 +170,13 @@ describe('controls', () => {
   beforeEach(() => {
     onClick.mockClear();
     page('/alice/status/222', '', tweet('alice', '222', text('Focal')) + editor() + toolbar('tweetButtonInline'));
-    wrap = injectControls(findReplyComposers()[0]!, onClick)!;
+    wrap = injectControls(findComposers()[0]!, onClick)!;
   });
 
   const ready: ControlsState = { ready: true, busy: null, hasText: false };
   const pills = () =>
     [...wrap.querySelectorAll<HTMLButtonElement>('.xc-reply-btn:not(.xc-reply-btn--icon)')].filter((b) => !b.hidden);
-  const regenerate = () => wrap.querySelector<HTMLButtonElement>('.xc-reply-btn--icon')!;
+  const refine = () => wrap.querySelector<HTMLButtonElement>('.xc-reply-btn--icon')!;
   const shown = () => {
     const [btn, ...rest] = pills();
     expect(rest).toEqual([]);
@@ -166,26 +190,26 @@ describe('controls', () => {
     return e;
   };
 
-  it('offers Generate on an empty box, and Regenerate and Rewrite, with its menu, once the box has text', () => {
+  it('offers Generate on an empty box, and Refine and Rewrite, with its menu, once the box has text', () => {
     renderControls(wrap, ready);
     expect(shown().textContent).toBe('Generate');
     expect(shown().getAttribute('aria-label')).toBe('Generate reply with x-companion');
-    expect(regenerate().hidden).toBe(true);
+    expect(refine().hidden).toBe(true);
 
     renderControls(wrap, { ...ready, hasText: true });
     expect(shown().textContent).toBe('Rewrite');
     expect(shown().popoverTargetElement).toBe(menu());
     expect([...menu().children].map((i) => i.textContent)).toEqual(['Polish', 'Punchier', 'Match style']);
-    expect(regenerate().hidden).toBe(false);
-    expect(regenerate().nextElementSibling).toBe(shown());
-    expect(regenerate().textContent).toBe('');
-    expect(regenerate().getAttribute('aria-label')).toBe('Regenerate reply with x-companion');
-    expect(regenerate().title).toBe('Regenerate');
+    expect(refine().hidden).toBe(false);
+    expect(refine().nextElementSibling).toBe(shown());
+    expect(refine().textContent).toBe('');
+    expect(refine().getAttribute('aria-label')).toBe('Refine reply with x-companion');
+    expect(refine().title).toBe('Refine');
   });
 
   it('setup: greyed with a hint, and the Rewrite menu stays shut', () => {
     renderControls(wrap, { ...ready, ready: false, hasText: true });
-    for (const btn of [shown(), regenerate()]) {
+    for (const btn of [shown(), refine()]) {
       expect(btn.getAttribute('aria-disabled')).toBe('true');
       expect(btn.title).toBe('x-companion: finish setup in the side panel');
     }
@@ -195,8 +219,8 @@ describe('controls', () => {
     expect(onClick).toHaveBeenCalledWith(shown(), null);
 
     renderControls(wrap, { ...ready, hasText: true });
-    expect(regenerate().hasAttribute('aria-disabled')).toBe(false);
-    expect(regenerate().title).toBe('Regenerate');
+    expect(refine().hasAttribute('aria-disabled')).toBe(false);
+    expect(refine().title).toBe('Refine');
   });
 
   it('busy: the running action shows on its pill, whatever the box holds', () => {
@@ -206,26 +230,17 @@ describe('controls', () => {
     expect(shown().getAttribute('aria-label')).toBe('Rewriting draft with x-companion');
     expect(shown().popoverTargetElement).toBeNull();
 
+    expect(refine().hidden).toBe(false);
+    expect(refine().getAttribute('aria-busy')).toBe('true');
+
+    // A Refine runs Generate: its icon hides with Rewrite, even before the box empties.
     renderControls(wrap, { ...ready, busy: 'reply', hasText: true });
     expect(shown().textContent).toBe('Generating…');
+    expect(shown().getAttribute('aria-label')).toBe('Generating reply with x-companion');
+    expect(refine().hidden).toBe(true);
     renderControls(wrap, ready);
     expect(shown().hasAttribute('aria-busy')).toBe(false);
     expect(shown().hasAttribute('aria-disabled')).toBe(false);
-  });
-
-  it('busy: Regenerate keeps its place and names itself on the Rewrite pill', () => {
-    renderControls(wrap, { ...ready, busy: 'regenerate', hasText: false });
-    expect(regenerate().hidden).toBe(false);
-    expect(shown().textContent).toBe('Regenerating…');
-    expect(shown().getAttribute('aria-label')).toBe('Regenerating reply with x-companion');
-    expect(shown().popoverTargetElement).toBeNull();
-    expect(regenerate().getAttribute('aria-label')).toBe('Regenerating reply with x-companion');
-    for (const btn of [shown(), regenerate()]) expect(btn.getAttribute('aria-busy')).toBe('true');
-
-    renderControls(wrap, { ...ready, hasText: true });
-    expect(shown().textContent).toBe('Rewrite');
-    expect(regenerate().getAttribute('aria-label')).toBe('Regenerate reply with x-companion');
-    expect(regenerate().hasAttribute('aria-busy')).toBe(false);
   });
 
   it('re-rendering an unchanged state causes no childList mutation', () => {
@@ -251,22 +266,65 @@ describe('controls', () => {
     expect(HTMLElement.prototype.hidePopover).toHaveBeenCalled();
   });
 
-  it('Regenerate runs its own action', () => {
+  it('Refine runs its own action', () => {
     renderControls(wrap, { ...ready, hasText: true });
-    expect(trustedClick(regenerate()).defaultPrevented).toBe(true);
-    expect(onClick).toHaveBeenCalledExactlyOnceWith(regenerate(), 'regenerate');
+    expect(trustedClick(refine()).defaultPrevented).toBe(true);
+    expect(onClick).toHaveBeenCalledExactlyOnceWith(refine(), 'refine');
   });
 
   it('ignores untrusted (scripted) clicks', () => {
     renderControls(wrap, ready);
     const item = menu().firstElementChild as HTMLElement;
-    for (const el of [shown(), regenerate(), item]) {
+    for (const el of [shown(), refine(), item]) {
       el.click();
       el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     }
     expect(onClick).not.toHaveBeenCalled();
     trustedClick(shown());
     expect(onClick).toHaveBeenCalledExactlyOnceWith(shown(), 'reply');
+  });
+});
+
+describe('new post controls', () => {
+  const onClick = vi.fn();
+  let wrap: HTMLElement;
+  let btn: HTMLButtonElement;
+  beforeEach(() => {
+    onClick.mockClear();
+    page('/home', '', editor() + toolbar('tweetButtonInline'));
+    wrap = injectControls(findComposers()[0]!, onClick)!;
+    btn = wrap.querySelector('button')!;
+  });
+  const ready: ControlsState = { ready: true, busy: null, hasText: true };
+
+  it('offers Refine only once the box has a draft', () => {
+    renderControls(wrap, { ...ready, hasText: false });
+    expect(btn.textContent).toBe('Refine');
+    expect(btn.disabled).toBe(true);
+    renderControls(wrap, ready);
+    expect(btn.disabled).toBe(false);
+    expect(btn.getAttribute('aria-label')).toBe('Refine post with x-companion');
+    const e = new MouseEvent('click', { bubbles: true, cancelable: true });
+    Object.defineProperty(e, 'isTrusted', { value: true });
+    btn.dispatchEvent(e);
+    expect(onClick).toHaveBeenCalledExactlyOnceWith(btn, 'refine-post');
+  });
+
+  it('setup: greyed with a hint but clickable, even on an empty box, to open the side panel', () => {
+    renderControls(wrap, { ...ready, ready: false, hasText: false });
+    expect(btn.disabled).toBe(false);
+    expect(btn.getAttribute('aria-disabled')).toBe('true');
+    expect(btn.title).toBe('x-companion: finish setup in the side panel');
+  });
+
+  it('busy: shows its progress', () => {
+    renderControls(wrap, { ...ready, busy: 'refine-post' });
+    expect(btn.textContent).toBe('Refining…');
+    expect(btn.getAttribute('aria-busy')).toBe('true');
+    expect(btn.getAttribute('aria-label')).toBe('Refining post with x-companion');
+    renderControls(wrap, ready);
+    expect(btn.textContent).toBe('Refine');
+    expect(btn.hasAttribute('aria-busy')).toBe(false);
   });
 });
 
@@ -282,7 +340,7 @@ describe('getTargetPost', () => {
       <img alt="avatar" src="https://pbs.twimg.com/profile_images/1/a_normal.jpg">
       ${quote('bob', `${text('Quoted take')}${photo(pbs('quoted'), 'Quoted photo')}<a data-testid="tweet-text-show-more-link">Show more</a>`)}`;
     page('/compose/post', `<div role="dialog">${tweet('alice', '111', body)}${editor()}${toolbar('tweetButton')}</div>`);
-    const [c] = findReplyComposers();
+    const [c] = findComposers();
     expect(getTargetPost(c!)).toEqual({
       author: '@alice',
       text: 'Hello 👋 world',
@@ -306,7 +364,7 @@ describe('getTargetPost', () => {
 
   const dialogPost = (body: string) => {
     page('/compose/post', `<div role="dialog"><article data-testid="tweet">${body}</article>${editor()}${toolbar('tweetButton')}</div>`);
-    return getTargetPost(findReplyComposers()[0]!);
+    return getTargetPost(findComposers()[0]!);
   };
 
   it('span-only header (reply dialog copy): author from the @handle after the display name', () => {
@@ -332,7 +390,7 @@ describe('getTargetPost', () => {
   describe('post page conversation', () => {
     const thread = (...cells: string[]) =>
       page('/alice/status/3', '', cells.map(cell).join('') + editor() + toolbar('tweetButtonInline'));
-    const target = () => getTargetPost(findReplyComposers()[0]!)!;
+    const target = () => getTargetPost(findComposers()[0]!)!;
 
     it('sends the posts above as earlier, and the author’s run right below as later', () => {
       thread(
@@ -380,7 +438,7 @@ describe('getTargetPost', () => {
       );
       const btn = document.querySelectorAll<HTMLElement>('main [data-testid="reply"]')[0]!;
       trackReplySource({ target: btn.querySelector('svg') } as unknown as Event);
-      const post = getTargetPost(findReplyComposers()[0]!)!;
+      const post = getTargetPost(findComposers()[0]!)!;
       expect(post.images).toEqual([{ url: sent('d'), alt: 'Image', video: false }]);
       expect(post.earlier.map((p) => p.text)).toEqual(['Root', 'Focal']);
     });
@@ -404,7 +462,7 @@ describe('getTargetPost', () => {
         tweet('bob', '5', text('Reply')),
       ]);
       clickReplyOn('Part 3');
-      const post = getTargetPost(findReplyComposers()[0]!)!;
+      const post = getTargetPost(findComposers()[0]!)!;
       expect(post.earlier.map((p) => p.text)).toEqual(['Part 1', 'Part 2']);
       expect(post.later.map((p) => p.text)).toEqual(['Part 4']);
     });
@@ -416,7 +474,7 @@ describe('getTargetPost', () => {
         tweet('alice', '3', text('Focal'), 'tabindex="-1"'),
       ]);
       clickReplyOn('Parent');
-      expect(getTargetPost(findReplyComposers()[0]!)).toMatchObject({
+      expect(getTargetPost(findComposers()[0]!)).toMatchObject({
         earlier: [{ text: 'Root' }],
         later: [],
       });
@@ -439,7 +497,7 @@ describe('getTargetPost', () => {
       const btn = document.querySelectorAll<HTMLElement>('main [data-testid="reply"]')[i]!;
       trackReplySource({ target: btn } as unknown as Event);
     };
-    const target = () => getTargetPost(findReplyComposers()[0]!)!;
+    const target = () => getTargetPost(findComposers()[0]!)!;
 
     it('takes the media and quoted post from the post whose Reply was clicked, the text from the copy', () => {
       page(
@@ -601,6 +659,29 @@ describe('setComposerText', () => {
     });
     expect(await run(ta, 'Line 1\nLine 2')).toBe(true);
     expect(insertTextCalls()).toHaveLength(1);
+  });
+
+  it('empties a Draft editor with a Backspace over the selection, since Draft ignores an empty paste', async () => {
+    const ed = draftEditor((t) => t);
+    ed.firstElementChild!.innerHTML = '<div data-block="true"><span>Old draft</span></div>';
+    ed.addEventListener('keydown', (e) => {
+      if (e.keyCode !== 8) return;
+      e.preventDefault();
+      ed.firstElementChild!.innerHTML = '<div data-block="true"><span><br data-text="true"></span></div>';
+    });
+    expect(await run(ed, '')).toBe(true);
+    expect(exec.mock.calls.filter(([cmd]) => cmd === 'delete')).toEqual([]);
+  });
+
+  it('empties an unhandled textarea with one delete', async () => {
+    page('/compose/post', '', '<div data-testid="tweetTextarea_0"><textarea>Old draft</textarea></div>');
+    const ta = document.querySelector('textarea')!;
+    exec.mockImplementation((cmd) => {
+      if (cmd === 'delete') ta.value = '';
+      return true;
+    });
+    expect(await run(ta, '')).toBe(true);
+    expect(exec.mock.calls.filter(([cmd]) => cmd === 'delete')).toHaveLength(1);
   });
 
   it('unfocused (detached) editor: no insertText, since it would write into whatever has focus', async () => {

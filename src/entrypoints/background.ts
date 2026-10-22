@@ -4,7 +4,9 @@ import { isXUrl, parseRequest, safeError } from '@/lib/background-utils';
 import { generateText } from '@/lib/llm';
 import type { ActionResponse, BackgroundRequest, ContentPush, StatusResponse } from '@/lib/messages';
 import { PROMPTS } from '@/lib/prompts';
+import { refinePostPrompt } from '@/lib/prompts/refine-post';
 import { cleanReply } from '@/lib/prompts/shared';
+import type { Profile, Prompt } from '@/lib/prompts/types';
 import { getSettings, getStatus, watchReady } from '@/lib/settings';
 
 // Tab-specific panel only (the manifest has no side_panel). setOptions is idempotent:
@@ -35,12 +37,15 @@ async function pushStatus(ready: boolean): Promise<void> {
   }
 }
 
-async function runAction({
-  action,
-  post,
-  draft,
-  me,
-}: Extract<BackgroundRequest, { type: 'run-action' }>): Promise<string> {
+type RunRequest = Extract<BackgroundRequest, { type: 'run-action' | 'refine-post' }>;
+
+function promptFor(req: RunRequest, profile: Profile): Prompt {
+  if (req.type === 'refine-post') return refinePostPrompt({ draft: req.draft, ...profile });
+  const { action, post, draft, me } = req;
+  return PROMPTS[action]({ context: { post, draft, me }, ...profile });
+}
+
+async function runAction(req: RunRequest): Promise<string> {
   const settings = await getSettings();
   const status = getStatus(settings);
   if (!status.ready) throw new Error('Finish setup in the x-companion side panel');
@@ -51,13 +56,9 @@ async function runAction({
     const text = cleanReply(
       await generateText(
         { provider: status.provider, apiKey, model: status.model },
-        PROMPTS[action]({
-          context: { post, draft, me },
-          style: settings.style,
-          projects: settings.projects,
-        }),
+        promptFor(req, { style: settings.style, projects: settings.projects }),
       ),
-      draft,
+      req.draft,
     );
     if (!text) throw new Error('The model returned an empty reply. Try again.');
     return text;
@@ -105,6 +106,7 @@ export default defineBackground(() => {
         );
         return true;
       case 'run-action':
+      case 'refine-post':
         runAction(req).then(
           (text) => sendResponse({ ok: true, text } satisfies ActionResponse),
           (e: unknown) =>
