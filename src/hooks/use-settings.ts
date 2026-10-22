@@ -1,18 +1,19 @@
 import { useEffect, useState } from 'react';
 import { PROVIDERS, type ProviderId } from '@/lib/providers';
-import { settingsItem, type Settings } from '@/lib/settings';
+import { getSettings, saveSettings, type Settings, watchSettings } from '@/lib/settings';
 
 /** Live view of stored settings; null until the first read resolves. */
 export function useSettings(): Settings | null {
   const [settings, setSettings] = useState<Settings | null>(null);
   useEffect(() => {
-    let changed = false;
-    const unwatch = settingsItem.watch((value) => {
-      changed = true;
-      setSettings(value);
-    });
-    // A change seen by the watcher is newer than this initial read.
-    void settingsItem.getValue().then((value) => changed || setSettings(value));
+    let latest = 0;
+    // Every change re-reads everything; only the newest read lands.
+    const refresh = () => {
+      const call = ++latest;
+      void getSettings().then((value) => call === latest && setSettings(value));
+    };
+    const unwatch = watchSettings(refresh);
+    refresh();
     return unwatch;
   }, []);
   return settings;
@@ -26,7 +27,10 @@ let queue: Promise<void> = Promise.resolve();
  * promise only, so later writes still run.
  */
 export function updateSettings(update: (s: Settings) => Settings): Promise<void> {
-  const run = queue.then(async () => settingsItem.setValue(update(await settingsItem.getValue())));
+  const run = queue.then(async () => {
+    const prev = await getSettings();
+    await saveSettings(update(prev), prev);
+  });
   queue = run.catch(() => {});
   return run;
 }

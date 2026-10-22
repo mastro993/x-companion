@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isXUrl, parseRequest } from './background-utils';
+import { isXUrl, parseRequest, safeError } from './background-utils';
 
 describe('isXUrl', () => {
   it.each<[string | undefined, boolean]>([
@@ -60,5 +60,23 @@ describe('parseRequest', () => {
     expect(req.post.quoted).toHaveLength(8000);
     expect(req.post.images).toHaveLength(4);
     expect(req.post.images.every((alt) => alt.length === 500)).toBe(true);
+  });
+});
+
+describe('safeError', () => {
+  const key = 'k3y-without-a-known-prefix';
+  it.each([
+    ['400: Model not found', '400: Model not found'],
+    [`401: bad key ${key}`, '401: bad key …'],
+    ['Incorrect API key provided: sk-proj-****abcd.', 'Incorrect API key provided: …'],
+    ['403: Project `proj_Ab12` cannot use model `gpt-6-luna`', '403: Project `…` cannot use model `gpt-6-luna`'],
+    [
+      '403: buy credits at https://console.x.ai/team/0f8fad5b-d9cb-469f-a165-70867728950e',
+      '403: buy credits at https://console.x.ai/team/…',
+    ],
+  ])('%j -> %j', (message, expected) => expect(safeError(message, key)).toBe(expected));
+
+  it('caps the length', () => {
+    expect(safeError('x'.repeat(500), key)).toHaveLength(200);
   });
 });

@@ -25,6 +25,7 @@ pnpm dev
 How the dev session behaves:
 
 - **Persistent profile**: the Chrome window uses its own profile in `.wxt/chrome-data`. Log in to X there once, and later runs keep the login.
+- **Keys in the dev profile**: keys you save in a dev build sit unencrypted in that profile, at a path anyone can predict from the fixed extension ID below. Any code you run as your user can read them, including a branch's install scripts and build plugins. Use throwaway keys with low spending caps for development, and give an untrusted branch a fresh profile (see [Use another browser or profile](#use-another-browser-or-profile)).
 - **Fixed extension ID**: dev builds carry a manifest `key`, so their extension ID is always `mogjdmpkbfcfdgedklmkjoploiamddcf`, wherever the checkout lives. Production builds have no key.
 - **Rebuilds**: saving a file rebuilds automatically. The side panel hot-reloads. Background and content-script changes reload the extension; if the controls don't come back, reload the x.com tab.
 - **One session per checkout**: a second `pnpm dev` takes the next port and overwrites `.output/chrome-mv3-dev`, which breaks the first session.
@@ -59,7 +60,7 @@ binaries.chrome=/Applications/Brave Browser.app/Contents/MacOS/Brave Browser
 chromiumProfile=/Users/you/.wxt-brave-profile
 ```
 
-With an absolute `chromiumProfile`, every checkout shares one profile. Thanks to the fixed extension ID, the X login and the side panel's settings (API keys, style guide) carry over between checkouts. The catch is that only one `pnpm dev` session can run at a time.
+With an absolute `chromiumProfile`, every checkout shares one profile. Thanks to the fixed extension ID, the X login and the side panel's settings (API keys, style guide) carry over between checkouts. The catch is that only one `pnpm dev` session can run at a time, and that every branch you run sees your saved keys.
 
 ## Build for production
 
@@ -104,7 +105,8 @@ x-companion has three parts that talk through extension messages, plus the provi
 - **Side panel** (`src/entrypoints/sidepanel/`, `src/components/sidepanel/`):
   - Built with React 19, shadcn/ui (Base UI) and Tailwind v4, in X's colour palette.
   - Follows the system light or dark theme.
-  - Keeps all state in extension storage.
+  - Keeps all state in extension storage: the settings in one item, the API keys in another (`src/lib/settings.ts`). Both live in `storage.local`. Only changed parts are written, so a style edit never rewrites the keys.
+  - Shows saved keys only masked: a key can be replaced or removed, never read back into the page.
 - **Large language model (LLM) adapters** (`src/lib/llm.ts`):
   - Two request paths: Chat Completions (OpenAI, xAI, DeepSeek, OpenRouter) and Anthropic Messages.
   - Request low reasoning effort when the model supports it.
@@ -134,7 +136,7 @@ src/
   hooks/                   useSettings (storage-backed), useModels, useAutosave
   lib/
     providers.ts           provider ids, labels, default models
-    settings.ts            settings storage item + getStatus
+    settings.ts            settings + key storage items, getStatus
     messages.ts            content <-> background message types
     llm.ts                 provider HTTP adapters
     jev.ts                 Jev decision-model adapter (not used yet)
@@ -153,6 +155,7 @@ These rules keep the extension small and private, and they limit the work when X
 - **Keep X selectors in one file**: every X selector and DOM routine lives in `src/lib/x-dom.ts`. When X changes its markup, that file is the only one to update.
 - **Keep the content script away from storage**: the content script runs on x.com and must never import settings or storage code. It asks the background for anything it needs.
 - **Treat messages as untrusted**: validate every message that reaches the background in `src/lib/background-utils.ts`, and cap the length of any new field.
+- **Clean text bound for x.com**: X's own scripts can read anything the content script shows. Pass error text through `safeError` in `src/lib/background-utils.ts`, which removes keys and account IDs.
 - **Call providers over plain HTTP**: the adapters use `fetch`, with no provider SDKs. To add a provider, extend `src/lib/providers.ts`, the matching request path in `src/lib/llm.ts` and the host list in `wxt.config.ts`.
 - **Reuse shadcn/ui components**: build side panel UI from the components in `src/components/ui/`. Add missing ones with the shadcn CLI rather than writing your own.
 - **Don't add permissions lightly**: every permission and host in `wxt.config.ts` shows up in the install prompt. Explain any new one in your pull request.
@@ -178,7 +181,8 @@ The unit tests use Vitest, and the DOM tests run in happy-dom. They cover:
 
 - provider request and response handling, with `fetch` stubbed
 - the prompts and message validation
-- settings status and the stored-settings migration
+- settings status, the stored-settings migration and where the keys are stored
+- error text cleanup before it reaches x.com
 - the side panel's key field, model reload, style guide saving and project list
 - the X DOM logic, against hand-written fixtures
 
@@ -190,8 +194,8 @@ You need an X account and an API key for at least one provider. Use `pnpm dev`, 
 
 1. **x.com only**: on an x.com tab, click the toolbar icon, and the side panel opens. Switch to any other site, and the panel hides while the icon greys out. Switch back, and both return.
 2. **Setup**:
-   - On the **Provider** tab, choose a provider and paste your key. The panel shows “Key verified · N models”, and the header changes to **Ready** with the style guide still empty.
-   - Paste a wrong key. The panel shows “Invalid API key”.
+   - On the **Provider** tab, choose a provider and paste your key. The panel shows “Key verified · N models”, and the header changes to **Ready** with the style guide still empty. The key shows only masked, with **Replace** and **Remove**.
+   - Click **Replace** and paste a key with another prefix, such as an Anthropic `sk-ant-` key while OpenAI is active. The panel warns that it doesn't look right and saves nothing. Click **Save**: the panel shows “Invalid API key”.
    - Pick a model.
    - On the **Style** tab, fill in each section. Each one shows **Saved** shortly after you stop typing. Switch to **Provider** and back: each section kept its text.
    - On the **Projects** tab, add a project. Its **Name** field gets focus. Fill in the fields: the card shows **Saved** shortly after you stop typing. Switch tabs and back: the project kept its text. **Remove** asks to confirm, and **Cancel** keeps it. **Add project** turns off at 10 projects.
@@ -200,7 +204,7 @@ You need an X account and an API key for at least one provider. Use `pnpm dev`, 
    - Type a character: **Generate** becomes **Rewrite**, with the **Regenerate** icon on its left. Delete it: **Generate** comes back alone.
    - No controls appear in the home “What's happening?” box, the new-post dialog or the quote dialog.
 4. **Not ready**:
-   - Clear the active provider's API key. The controls turn grey.
+   - Remove the active provider's API key. The controls turn grey.
    - Click **Generate**, then type something and click **Regenerate** and **Rewrite**. Each opens the side panel, and no menu opens.
    - Paste the key again. The controls become active without a page reload.
 5. **Generate**:
@@ -227,7 +231,7 @@ Each part of the extension has its own DevTools console:
 - **Stored settings**: run `await chrome.storage.local.get()` in the service worker console.
 
 > [!CAUTION]
-> The stored settings output includes your API keys. Don't paste it into issues, pull requests or chats.
+> The `apiKeys` entry in that output holds your API keys. So do network logs: DevTools' **Export HAR (sanitized)** strips only the `authorization` and `cookie` headers, and Anthropic keys travel in `x-api-key`. Don't paste either into issues, pull requests or chats.
 
 ## Open a pull request
 

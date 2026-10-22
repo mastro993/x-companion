@@ -1,11 +1,11 @@
 import { browser } from 'wxt/browser';
 import { defineBackground } from 'wxt/utils/define-background';
-import { isXUrl, parseRequest } from '@/lib/background-utils';
+import { isXUrl, parseRequest, safeError } from '@/lib/background-utils';
 import { generateText } from '@/lib/llm';
 import type { ActionResponse, BackgroundRequest, ContentPush, StatusResponse } from '@/lib/messages';
 import { PROMPTS } from '@/lib/prompts';
 import { cleanReply } from '@/lib/prompts/shared';
-import { getStatus, settingsItem } from '@/lib/settings';
+import { getSettings, getStatus, watchReady } from '@/lib/settings';
 
 // Tab-specific panel only (the manifest has no side_panel). setOptions is idempotent:
 // it doesn't reload an open panel, so syncing on every tab update is fine.
@@ -40,7 +40,7 @@ async function runAction({
   post,
   draft,
 }: Extract<BackgroundRequest, { type: 'run-action' }>): Promise<string> {
-  const settings = await settingsItem.getValue();
+  const settings = await getSettings();
   const status = getStatus(settings);
   if (!status.ready) throw new Error('Finish setup in the x-companion side panel');
   const apiKey = settings.providers[status.provider]?.apiKey.trim() ?? '';
@@ -60,6 +60,9 @@ async function runAction({
     );
     if (!text) throw new Error('The model returned an empty reply. Try again.');
     return text;
+  } catch (e) {
+    // Error text ends up in x.com's page, where X's own scripts can read it.
+    throw new Error(safeError(e instanceof Error ? e.message : String(e), apiKey));
   } finally {
     clearInterval(keepalive);
   }
@@ -78,10 +81,7 @@ export default defineBackground(() => {
   // Every worker start: covers install, update, enable and browser start. Idempotent.
   void syncAllTabs();
 
-  settingsItem.watch((next, prev) => {
-    const ready = getStatus(next).ready;
-    if (ready !== getStatus(prev).ready) void pushStatus(ready);
-  });
+  watchReady((ready) => void pushStatus(ready));
 
   // One non-async listener with `return true` + sendResponse: Promise returns need Chrome 148+,
   // and an async listener would answer every message (with null) before we do.
@@ -98,7 +98,7 @@ export default defineBackground(() => {
         sendResponse();
         return;
       case 'get-status':
-        settingsItem.getValue().then(
+        getSettings().then(
           (s) => sendResponse({ ready: getStatus(s).ready } satisfies StatusResponse),
           () => sendResponse({ ready: false } satisfies StatusResponse),
         );

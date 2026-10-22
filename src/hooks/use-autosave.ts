@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { settingsItem, type Settings } from '@/lib/settings';
+import { saveSettings, type Settings } from '@/lib/settings';
 import { updateSettings } from './use-settings';
 
 const SAVE_DELAY_MS = 400;
@@ -32,12 +32,14 @@ export function useAutosave(
 
   useEffect(() => {
     // The panel is being torn down: updateSettings' read round trip would never finish,
-    // so write the last known settings in a single call.
+    // so write the last known settings in a single call. Only changed parts are written, so
+    // this stale snapshot never rewrites the keys.
     const onPageHide = () => {
       const text = pending.current;
       if (text === null) return;
       pending.current = null;
-      void settingsItem.setValue(latest.current.apply(latest.current.settings, text));
+      const { settings, apply } = latest.current;
+      void saveSettings(apply(settings, text), settings);
     };
     addEventListener('pagehide', onPageHide);
     return () => {
