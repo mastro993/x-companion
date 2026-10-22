@@ -1,5 +1,5 @@
 // Every X-coupled selector and DOM trick lives here, so X markup changes are fixed in one file.
-import { ACTIONS, type ActionId, type TargetPost } from './messages';
+import { ACTIONS, type ActionId, type Post, type PostImage, type TargetPost } from './messages';
 
 // Draft.js contenteditable (thread parts are _1.._n), plus the narrow-layout textarea.
 const EDITOR =
@@ -7,7 +7,11 @@ const EDITOR =
 // X flips between these two within one route; always query both.
 const SUBMIT = '[data-testid="tweetButtonInline"], [data-testid="tweetButton"]';
 const TWEET = 'article[data-testid="tweet"]';
-const QUOTE = 'div[role="link"], [data-testid="quoteTweet"], [data-testid="card.wrapper"]';
+// Quote cards, and link preview cards, which hold none of the post's own content either.
+const QUOTE = 'div[role="link"], [data-testid="card.wrapper"]';
+const REPLY_BUTTON = '[data-testid="reply"]';
+const EDITABLE = 'input, textarea, [contenteditable]';
+const CELL = '[data-testid="cellInnerDiv"]';
 const INSIDE_EDITOR = '[contenteditable], .DraftEditor-root, [data-testid$="RichTextInputContainer"]';
 const MARK = 'data-xc-reply';
 const COMPOSE_PATH = '/compose/post';
@@ -39,6 +43,7 @@ const LABELS: Record<ControlAction, { label: string; busy: string }> = {
 // Anchored: /photo/1, /video/1, /analytics are modals over the page below (e.g. the home composer).
 const statusId = () => location.pathname.match(/^\/(?:i\/web|[^/]+)\/status\/(\d+)\/?$/)?.[1];
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+const follows = (a: Node, b: Node) => !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
 
 /** Composer root: a dialog, or `main` on a status page / the narrow-layout compose page. */
 export function rootOf(el: Element): Element | null {
@@ -59,9 +64,7 @@ function targetArticle({ root, editor }: Composer): HTMLElement | null {
     // The original sits above the editor; a quote preview mounts in `attachments` below it.
     return (
       articles.findLast(
-        (a) =>
-          !a.closest('[data-testid="attachments"]') &&
-          a.compareDocumentPosition(editor) & Node.DOCUMENT_POSITION_FOLLOWING,
+        (a) => !a.closest('[data-testid="attachments"]') && follows(a, editor),
       ) ?? null
     );
   }
@@ -258,32 +261,154 @@ function textOf(el: Element | undefined): string {
   return s.trim();
 }
 
-export function getTargetPost(c: Composer): TargetPost | null {
-  const a = targetArticle(c);
-  if (!a) return null;
-  // Every <a> on X has role="link" (incl. the post's own photo links), so only div[role=link] is a quote card.
-  const inQuote = (el: Element) => {
+/** A pbs.twimg.com picture as JPEG (xAI reads only JPEG and PNG), ~1200 px so screenshot text stays legible. */
+function mediaUrl(src: string | null): URL | null {
+  const url = URL.parse(src ?? '');
+  if (url?.protocol !== 'https:' || url.hostname !== 'pbs.twimg.com') return null;
+  if (url.searchParams.has('format')) url.searchParams.set('format', 'jpg');
+  if (url.searchParams.has('name')) url.searchParams.set('name', 'medium');
+  return url;
+}
+
+/** Photos and video thumbnails (amplify_, ext_tw_ and tweet_video_thumb), once each. */
+function mediaOf(els: Element[]): PostImage[] {
+  const out: PostImage[] = [];
+  const seen = new Set<string>();
+  for (const el of els) {
+    const url = mediaUrl(el.getAttribute(el instanceof HTMLVideoElement ? 'poster' : 'src'));
+    if (!url || seen.has(url.pathname)) continue; // a video can show its thumbnail twice
+    seen.add(url.pathname);
+    const alt = el instanceof HTMLImageElement ? el.alt : '';
+    out.push({ url: url.href, alt, video: url.pathname.includes('video_thumb') });
+  }
+  return out;
+}
+
+/** What belongs to `scope` (an article or its quote card) itself, not to a quote card inside it. */
+function find(scope: Element, sel: string): Element[] {
+  return [...scope.querySelectorAll(sel)].filter((el) => {
     const q = el.closest(QUOTE);
-    return !!q && a.contains(q);
-  };
-  const own = <T extends Element>(sel: string) =>
-    [...a.querySelectorAll<T>(sel)].filter((el) => !inQuote(el));
-  const texts = [...a.querySelectorAll('[data-testid="tweetText"]')];
-  const head = own('[data-testid="User-Name"]')[0];
-  // The reply dialog's copy of the original can render the header as spans, without profile links.
+    return !q || q === scope || !scope.contains(q);
+  });
+}
+
+function authorOf(scope: Element): string {
+  const head = find(scope, '[data-testid="User-Name"]')[0];
+  // The reply dialog's copy and quote cards render the header as spans, without profile links.
+  // The handle comes after the display name, which can hold an @word too.
   const handle =
     head?.querySelector('a[href^="/"]')?.getAttribute('href')?.slice(1) ??
-    textOf(head).match(/@(\w{1,15})/)?.[1];
+    [...textOf(head).matchAll(/@(\w{1,15})/g)].at(-1)?.[1];
+  return handle ? `@${handle}` : '';
+}
+
+function postIn(scope: Element): Omit<Post, 'quoted'> {
   return {
-    author: handle ? `@${handle}` : '',
-    // The reply modal appends pic.x.com short links for attached media.
-    text: textOf(texts.find((t) => !inQuote(t)))
-      .replace(/\s*pic\.(x|twitter)\.com\/\S+/g, '')
+    author: authorOf(scope),
+    // The reply dialog appends https://pic.x.com short links for attached media.
+    text: textOf(find(scope, '[data-testid="tweetText"]')[0])
+      .replace(/\s*(?:https?:\/\/)?pic\.(?:x|twitter)\.com\/\S+/g, '')
       .trim(),
-    quoted: textOf(texts.find(inQuote)),
-    images: own<HTMLImageElement>('[data-testid="tweetPhoto"] img').map((i) => i.alt),
-    truncated: own('[data-testid="tweet-text-show-more-link"]').length > 0,
+    images: mediaOf(find(scope, '[data-testid="tweetPhoto"] img, video[poster]')),
+    truncated: find(scope, '[data-testid="tweet-text-show-more-link"]').length > 0,
   };
+}
+
+function postOf(a: Element): Post {
+  // Every <a> on X has role="link" (incl. the post's own photo links), so only div[role=link] is a quote card.
+  const card = a.querySelector('div[role="link"]');
+  const quoted = card && postIn(card);
+  // An unavailable quoted post renders as an empty card.
+  const hasQuote = !!quoted && (!!quoted.author || !!quoted.text || quoted.images.length > 0);
+  return { ...postIn(a), quoted: hasQuote ? { ...quoted, quoted: null } : null };
+}
+
+const collapse = (s: string) => s.replace(/\s+/g, ' ').trim();
+/** By prefix: one of the two may stop at "Show more". Media-only posts match only each other. */
+function sameText(a: string, b: string): boolean {
+  const [x, y] = [collapse(a), collapse(b)];
+  return x === y || (!!x && !!y && (x.startsWith(y) || y.startsWith(x)));
+}
+const sameAs = (copy: Omit<Post, 'quoted'>) => (p: Omit<Post, 'quoted'>) =>
+  p.author === copy.author && sameText(p.text, copy.text);
+
+let replied: TargetPost | null = null;
+
+/** Capture-phase click and keydown listener: reads the post the next reply dialog opens for. */
+export function trackReplySource(e: Event): void {
+  const el = e.target instanceof Element ? e.target : null;
+  const opens =
+    e instanceof KeyboardEvent
+      ? // X's "r" shortcut replies to the post that j/k focused. Typing, or an open dialog, opens none.
+        e.key === 'r' && !e.ctrlKey && !e.metaKey && !e.altKey && !el?.closest(`${EDITABLE}, [role="dialog"]`)
+      : !!el?.closest(REPLY_BUTTON);
+  if (!opens) return;
+  const a = el?.closest(TWEET);
+  // Read now: X can unmount the post before Generate, and the narrow layout navigates away.
+  replied = a ? withConversation(a) : null;
+}
+
+/**
+ * The post a dialog's copy stands for: the only match on the page below (the photo viewer's
+ * composer opens without a Reply click), else the post whose Reply opened it.
+ */
+function dialogSource(copy: Omit<Post, 'quoted'>, shown: Element): TargetPost | null {
+  const matches = [...document.querySelectorAll(`main ${TWEET}`)].filter(
+    (a) => a !== shown && sameAs(copy)(postIn(a)),
+  );
+  if (matches.length === 1) return withConversation(matches[0]!);
+  return replied && sameAs(copy)(replied) ? replied : null;
+}
+
+/**
+ * On a post's page, the conversation around `a`: the posts above it, oldest first, and its
+ * author's run right below it. Timelines show unrelated posts, so they have none.
+ */
+function conversation(a: Element): { earlier: Element[]; later: Element[] } {
+  const main = a.closest('main');
+  const focal = main?.querySelector(`${TWEET}[tabindex="-1"]`);
+  if (!main || !focal) return { earlier: [], later: [] };
+  // "Discover more" (a heading cell) ends the conversation.
+  const end = [...main.querySelectorAll(`${CELL} h2`)].find((h) => follows(focal, h));
+  const posts = [...main.querySelectorAll(TWEET)].filter((p) => !end || follows(p, end));
+  const i = posts.indexOf(a);
+  const f = posts.indexOf(focal);
+  if (i < 0) return { earlier: [], later: [] };
+  // The author's posts right after `from`: the rest of their thread.
+  const runAfter = (from: number) => {
+    const author = authorOf(posts[from]!);
+    const stop = posts.findIndex((p, j) => j > from && authorOf(p) !== author);
+    return posts.slice(from + 1, stop < 0 ? posts.length : stop);
+  };
+  // The posts above the focal one are its parents, and each part of the focal author's thread
+  // below it replies to the one before. Other replies hang off the focal post, maybe through
+  // replies the page doesn't tell apart from their siblings.
+  const inThread = i <= f || runAfter(f).includes(a);
+  return { earlier: posts.slice(0, inThread ? i : f + 1), later: runAfter(i) };
+}
+
+function withConversation(a: Element): TargetPost {
+  const { earlier, later } = conversation(a);
+  return { ...postOf(a), earlier: earlier.map(postOf), later: later.map(postOf) };
+}
+
+export function getTargetPost(c: Composer): TargetPost | null {
+  const shown = targetArticle(c);
+  if (!shown) return null;
+  if (!needsArticle(c.root)) return withConversation(shown);
+  // Dialogs and the compose page show a stripped copy: no media or quote card, pic.x.com links
+  // in the text. Its text stays: the page post's may stop at "Show more".
+  const copy = postOf(shown);
+  const source = dialogSource(copy, shown);
+  const { author, text, truncated } = copy;
+  return source ? { ...source, author, text, truncated } : { ...copy, earlier: [], later: [] };
+}
+
+/** The logged-in user's "@handle", from the side navigation's profile link; "" if not found. */
+export function viewerHandle(): string {
+  const href = document.querySelector('a[data-testid="AppTabBar_Profile_Link"]')?.getAttribute('href');
+  const handle = href?.match(/^\/(\w{1,15})$/)?.[1];
+  return handle ? `@${handle}` : '';
 }
 
 /** Draft model text: one line per block (innerText doubles blank lines). */

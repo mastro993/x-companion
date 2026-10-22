@@ -100,7 +100,10 @@ x-companion has three parts that talk through extension messages, plus the provi
   - Watches the page for reply composers: the reply dialog, the inline composer on a post page and the narrow-layout `/compose/post` page.
   - Inserts the controls before X's **Reply** button: **Generate** on an empty box, then the **Regenerate** icon and **Rewrite** with its menu once the box has text. New-post, quote and home composers get no controls.
   - The Rewrite menu is a native popover with CSS anchor positioning, so it sits in the top layer and X's overflow can't clip it.
-  - Reads the target post: the author, the text with emoji, any quoted post, image alt text and whether **Show more** cut it off.
+  - Reads the target post: the author, the text with emoji, photos and video thumbnails with their alt text, the quoted post and whether **Show more** cut it off.
+  - On a post's page, also reads the conversation around it: the posts above the target, and its author's run of posts right below it. For a reply below the main post, the posts above are the main post, the ones above it and, inside the main author's own thread, that thread's earlier parts. A timeline isn't a conversation, so it reads none there.
+  - The reply dialog shows a stripped copy of the post, without media or quote card. So the content script takes the media, the quoted post and the conversation from the only post on the page that matches the copy by author and text. When several match, or none is on the page any more (the narrow layout navigates away), it uses the post it read when the **Reply** button was clicked, or when X's `r` shortcut was pressed on a focused post.
+  - Reads the user's own @handle from the side navigation's profile link, so the prompt can say which posts are theirs.
   - Fills the Draft.js editor with a synthetic paste, then checks the result. A result is dropped if the box changed while the action ran.
 - **Side panel** (`src/entrypoints/sidepanel/`, `src/components/sidepanel/`):
   - Built with React 19, shadcn/ui (Base UI) and Tailwind v4, in X's colour palette.
@@ -110,14 +113,16 @@ x-companion has three parts that talk through extension messages, plus the provi
 - **Large language model (LLM) adapters** (`src/lib/llm.ts`):
   - Two request paths: Chat Completions (OpenAI, xAI, DeepSeek, OpenRouter) and Anthropic Messages.
   - Request low reasoning effort when the model supports it.
+  - Attach images as `pbs.twimg.com` URLs, each after a text label that matches its marker in the prompt, so the provider downloads them. If the provider rejects a request with images (a 400, 404 or 422), the adapter retries once without them. This covers models that can't read images and pictures the provider couldn't fetch.
 - **Jev adapter** (`src/lib/jev.ts`), not used yet:
   - Asks [Jev](https://docs.typesafe.ai/introduction), TypeSafe's decision model, typed questions about some state: yes/no, pick one option or rate on a scale. The answers come back typed, with probabilities instead of text.
   - Sends the same System One request to TypeSafe with a TypeSafe key, or to OpenRouter with an OpenRouter key.
   - The host list includes `https://api.typesafe.ai/*` for the TypeSafe route, because TypeSafe's CORS rules reject extension origins.
 - **Prompts** (`src/lib/prompts/`):
-  - One file per action. Each exports a `PromptBuilder`: a function from `PromptConfig` (the context, meaning the post and the reply box text, plus the style guide and projects) to a system and user message.
+  - One file per action. Each exports a `PromptBuilder`: a function from `PromptConfig` (the context, meaning the post with its conversation and the reply box text, plus the style guide and projects) to a system message, a user message and the pictures to attach.
   - `PROMPTS` in `index.ts` maps each action in `ACTIONS` (`src/lib/messages.ts`) to its prompt. To add an action, add its ID there, write its prompt file and register it, then give it a label in `src/lib/x-dom.ts`.
-  - The rewrite actions share `rewrite.ts`, so each of their files holds only its instruction. The shared blocks (style guide, projects, the post and its context, delimiter stripping) live in `shared.ts`.
+  - The rewrite actions share `rewrite.ts`, so each of their files holds only its instruction. The shared blocks (style guide, projects, the post with its conversation and quoted post, image markers, delimiter stripping) live in `shared.ts`.
+  - Each post is its own tagged block: `<earlier>` posts, then the target `<post>`, then `<later>` posts, each with any `<quote>` inside. Media show as `[Image N]` or `[Video N]` markers. Up to 8 pictures are attached, numbered in priority order: the target's, its quote's, then the conversation's, nearest first.
   - A fresh reply is capped at 280 characters. A rewrite keeps that cap, or the draft's length if it's longer.
 
 ## Project structure
@@ -217,9 +222,15 @@ You need an X account and an API key for at least one provider. Use `pnpm dev`, 
    - Pick each action on a multi-line draft. The pill shows its progress (“Polishing…”, “Rewriting…”), then the rewrite replaces the draft and keeps its line breaks.
    - **Polish** on a draft that needs no fixes leaves the box as it was.
 7. **Errors**: use a bad key, or go offline, and run an action. A short message appears next to the controls for about 6s.
-8. **Each provider**: for every provider you have a key for, switch the active provider and generate once.
-9. **Narrow window**: shrink the window until X switches to its narrow layout, where replies open as a `/compose/post` page. The controls still appear, switch between Generate and Rewrite as you type, and fill the box.
-10. **Themes**: under X's Default and Lights out themes, the controls and the Rewrite menu stay readable. After you switch theme, reopen the composer.
+8. **Context**: open the service worker's DevTools (see [Debug the extension](#debug-the-extension)) on its **Network** tab, generate once in each case below, and check the user message of the provider request:
+   - On the page of a post in the middle of a thread, the posts above it appear as `<earlier>` blocks, and its author's next posts as `<later>` blocks.
+   - A post that quotes another post has a `<quote>` block with the quoted post's author and text.
+   - A post with photos, from the reply dialog on the home timeline, from the photo viewer and from its own page, sends labelled image parts (`Image 1:`) with `pbs.twimg.com` URLs, and the reply reacts to the pictures.
+   - The system message names your own handle (`The user is @you`).
+   - With a model that can't read images, such as a text-only OpenRouter model, the first request fails and a second one, without images, succeeds.
+9. **Each provider**: for every provider you have a key for, switch the active provider and generate once.
+10. **Narrow window**: shrink the window until X switches to its narrow layout, where replies open as a `/compose/post` page. The controls still appear, switch between Generate and Rewrite as you type, and fill the box.
+11. **Themes**: under X's Default and Lights out themes, the controls and the Rewrite menu stay readable. After you switch theme, reopen the composer.
 
 ## Debug the extension
 

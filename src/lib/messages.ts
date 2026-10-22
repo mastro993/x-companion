@@ -1,9 +1,22 @@
-export interface TargetPost {
+/** A photo, or a video's thumbnail. */
+export interface PostImage {
+  url: string; // https://pbs.twimg.com/…, sized for a vision model
+  alt: string; // "" when X shows none
+  video: boolean;
+}
+
+export interface Post {
   author: string; // "@handle" or ""
   text: string; // post text, emoji included (img alt)
-  quoted: string; // quoted post text or ""
-  images: string[]; // alt texts of the post's own photos
+  images: PostImage[]; // the post's own media, not the quoted post's
   truncated: boolean; // "Show more" present
+  quoted: Post | null; // the post it quotes; a quoted post never has one
+}
+
+/** The post being replied to, with the conversation the page shows around it. */
+export interface TargetPost extends Post {
+  earlier: Post[]; // posts above it in the conversation, oldest first
+  later: Post[]; // its author's posts right below it: the rest of their thread
 }
 
 /** Composer actions. `reply` drafts into an empty box; the others rewrite the box's text. */
@@ -17,7 +30,7 @@ export const MAX_TEXT = 8000;
 export type BackgroundRequest =
   | { type: 'get-status' }
   | { type: 'open-side-panel' }
-  | { type: 'run-action'; action: ActionId; post: TargetPost; draft: string };
+  | { type: 'run-action'; action: ActionId; post: TargetPost; draft: string; me: string };
 
 /** background -> content script (pushed via tabs.sendMessage when settings change) */
 export type ContentPush = { type: 'status'; ready: boolean };
