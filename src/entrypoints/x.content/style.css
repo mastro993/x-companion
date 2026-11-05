@@ -28,7 +28,7 @@
 .xc-reply-btn[hidden] {
   display: none;
 }
-/* Refine: icon only, a circle the pills' height. */
+/* Regenerate: icon only, a circle the pills' height. */
 .xc-reply-btn--icon {
   justify-content: center;
   width: 36px;
@@ -79,6 +79,21 @@
     animation: none;
   }
 }
+/* Generate: filled in the theme's text colour, so it never reads as greyed out like X's Reply
+   beside it on an empty box. After the rules above, which it overrides at equal specificity. */
+.xc-reply-btn--solid {
+  border-color: transparent;
+  background-color: currentColor;
+}
+.xc-reply-btn--solid > * {
+  color: var(--xc-page, Canvas);
+}
+.xc-reply-btn--solid:enabled:hover {
+  background-color: color-mix(in srgb, currentColor 85%, var(--xc-page, Canvas));
+}
+.xc-reply-btn--solid[aria-busy='true']:hover {
+  background-color: currentColor;
+}
 
 /* Rewrite menu: a top-layer popover, so X's overflow and stacking can't clip it. */
 .xc-menu {
@@ -95,7 +110,7 @@
   border: 1px solid color-mix(in srgb, currentColor 15%, transparent);
   border-radius: 12px;
   color: inherit;
-  background: Canvas; /* X's page background, set inline when there is one */
+  background: var(--xc-page, Canvas); /* X's page background, set on the controls when there is one */
   box-shadow: 0 2px 12px rgb(0 0 0 / 0.2);
 }
 .xc-menu-item {

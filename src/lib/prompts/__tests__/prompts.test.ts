@@ -55,6 +55,13 @@ describe('reply prompt', () => {
     expect(user).toContain('don\'t use the word "curious"');
   });
 
+  it('asks for a reply that adds to the post, never bare agreement or praise', () => {
+    const { system, user } = replyPrompt(config());
+    expect(system).toContain('add something it doesn\'t already say. Never just restate it, agree with it or praise it.');
+    expect(user).toContain('Every reply adds one thing to the conversation');
+    expect(user).toContain('"Great point"');
+  });
+
   it("names the user's own handle only when the page showed it", () => {
     expect(replyPrompt(config({ context: { me: '@jack' } })).system).toContain(
       "- The user is @jack: posts by @jack are the user's own.",
