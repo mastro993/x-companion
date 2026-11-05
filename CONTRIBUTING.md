@@ -255,4 +255,3 @@ Branch from `main` and keep each pull request to one change:
 - **Commit messages** follow [Conventional Commits](https://www.conventionalcommits.org/), for example `feat: add Gemini provider` or `fix: detect the inline reply box`.
 - **Checks**: `pnpm compile`, `pnpm test` and `pnpm build` pass, and you ran the manual tests that your change touches.
 - **Description**: say what changed, why, and how you tested it. For side panel or composer control changes, add before and after screenshots with no API keys or personal data in them.
-- **Review**: automated Claude reviews run on the owner's pull requests. Other pull requests get one only after the owner adds the `claude-review` label.
