@@ -176,7 +176,7 @@ describe('controls', () => {
   const ready: ControlsState = { ready: true, busy: null, hasText: false };
   const pills = () =>
     [...wrap.querySelectorAll<HTMLButtonElement>('.xc-reply-btn:not(.xc-reply-btn--icon)')].filter((b) => !b.hidden);
-  const refine = () => wrap.querySelector<HTMLButtonElement>('.xc-reply-btn--icon')!;
+  const regenerate = () => wrap.querySelector<HTMLButtonElement>('.xc-reply-btn--icon')!;
   const shown = () => {
     const [btn, ...rest] = pills();
     expect(rest).toEqual([]);
@@ -190,26 +190,40 @@ describe('controls', () => {
     return e;
   };
 
-  it('offers Generate on an empty box, and Refine and Rewrite, with its menu, once the box has text', () => {
+  it('offers Generate on an empty box, and Regenerate and Rewrite, with its menu, once the box has text', () => {
     renderControls(wrap, ready);
     expect(shown().textContent).toBe('Generate');
     expect(shown().getAttribute('aria-label')).toBe('Generate reply with x-companion');
-    expect(refine().hidden).toBe(true);
+    expect(regenerate().hidden).toBe(true);
 
     renderControls(wrap, { ...ready, hasText: true });
     expect(shown().textContent).toBe('Rewrite');
     expect(shown().popoverTargetElement).toBe(menu());
     expect([...menu().children].map((i) => i.textContent)).toEqual(['Polish', 'Punchier', 'Match style']);
-    expect(refine().hidden).toBe(false);
-    expect(refine().nextElementSibling).toBe(shown());
-    expect(refine().textContent).toBe('');
-    expect(refine().getAttribute('aria-label')).toBe('Refine reply with x-companion');
-    expect(refine().title).toBe('Refine');
+    expect(regenerate().hidden).toBe(false);
+    expect(regenerate().nextElementSibling).toBe(shown());
+    expect(regenerate().textContent).toBe('');
+    expect(regenerate().getAttribute('aria-label')).toBe('Regenerate with x-companion');
+    expect(regenerate().title).toBe('Regenerate');
+  });
+
+  it("Generate is filled with X's page colour, and stays enabled on an empty box where X greys out Reply", () => {
+    wrap.remove();
+    document.body.style.backgroundColor = 'rgb(0, 0, 0)';
+    wrap = injectControls(findComposers()[0]!, onClick)!;
+    document.body.style.backgroundColor = '';
+    renderControls(wrap, ready);
+    expect(shown().classList).toContain('xc-reply-btn--solid');
+    expect(shown().disabled).toBe(false);
+    expect(shown().hasAttribute('aria-disabled')).toBe(false);
+    expect(wrap.style.getPropertyValue('--xc-page')).toBe('rgb(0, 0, 0)');
+    renderControls(wrap, { ...ready, hasText: true });
+    expect(shown().classList).not.toContain('xc-reply-btn--solid');
   });
 
   it('setup: greyed with a hint, and the Rewrite menu stays shut', () => {
     renderControls(wrap, { ...ready, ready: false, hasText: true });
-    for (const btn of [shown(), refine()]) {
+    for (const btn of [shown(), regenerate()]) {
       expect(btn.getAttribute('aria-disabled')).toBe('true');
       expect(btn.title).toBe('x-companion: finish setup in the side panel');
     }
@@ -219,8 +233,8 @@ describe('controls', () => {
     expect(onClick).toHaveBeenCalledWith(shown(), null);
 
     renderControls(wrap, { ...ready, hasText: true });
-    expect(refine().hasAttribute('aria-disabled')).toBe(false);
-    expect(refine().title).toBe('Refine');
+    expect(regenerate().hasAttribute('aria-disabled')).toBe(false);
+    expect(regenerate().title).toBe('Regenerate');
   });
 
   it('busy: the running action shows on its pill, whatever the box holds', () => {
@@ -230,14 +244,14 @@ describe('controls', () => {
     expect(shown().getAttribute('aria-label')).toBe('Rewriting draft with x-companion');
     expect(shown().popoverTargetElement).toBeNull();
 
-    expect(refine().hidden).toBe(false);
-    expect(refine().getAttribute('aria-busy')).toBe('true');
+    expect(regenerate().hidden).toBe(false);
+    expect(regenerate().getAttribute('aria-busy')).toBe('true');
 
-    // A Refine runs Generate: its icon hides with Rewrite, even before the box empties.
+    // Regenerating a reply runs Generate: its icon hides with Rewrite, even before the box empties.
     renderControls(wrap, { ...ready, busy: 'reply', hasText: true });
     expect(shown().textContent).toBe('Generating…');
     expect(shown().getAttribute('aria-label')).toBe('Generating reply with x-companion');
-    expect(refine().hidden).toBe(true);
+    expect(regenerate().hidden).toBe(true);
     renderControls(wrap, ready);
     expect(shown().hasAttribute('aria-busy')).toBe(false);
     expect(shown().hasAttribute('aria-disabled')).toBe(false);
@@ -266,16 +280,16 @@ describe('controls', () => {
     expect(HTMLElement.prototype.hidePopover).toHaveBeenCalled();
   });
 
-  it('Refine runs its own action', () => {
+  it('Regenerate runs its own action', () => {
     renderControls(wrap, { ...ready, hasText: true });
-    expect(trustedClick(refine()).defaultPrevented).toBe(true);
-    expect(onClick).toHaveBeenCalledExactlyOnceWith(refine(), 'refine');
+    expect(trustedClick(regenerate()).defaultPrevented).toBe(true);
+    expect(onClick).toHaveBeenCalledExactlyOnceWith(regenerate(), 'regenerate');
   });
 
   it('ignores untrusted (scripted) clicks', () => {
     renderControls(wrap, ready);
     const item = menu().firstElementChild as HTMLElement;
-    for (const el of [shown(), refine(), item]) {
+    for (const el of [shown(), regenerate(), item]) {
       el.click();
       el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
     }
