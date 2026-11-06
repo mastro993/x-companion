@@ -6,7 +6,7 @@
 x-companion is a Chromium extension that drafts replies and refines posts on X (x.com) in your own writing style. It adds three controls to X's reply composer:
 
 - **Generate**, on an empty reply box: drafts a reply to the post.
-- **Refine**, an icon left of **Rewrite** once the box has text: deletes the box's text, then generates a fresh reply from scratch, as **Generate** does on an empty box. If generation fails, your text comes back.
+- **Regenerate**, an icon left of **Rewrite** once the box has text: runs your last generation on this post again. After a rewrite, it reruns that rewrite on the text it started from, or on your edit if you've changed the result since. Otherwise it deletes the box's text and generates a fresh reply from scratch, as **Generate** does on an empty box. If that fails, your text comes back.
 - **Rewrite**, once the box has text: a menu that reworks your draft. **Polish** fixes typos, grammar and awkward phrasing with the smallest edits. **Punchier** makes it clearer and catchier. **Match style** brings it closer to your style guide.
 
 In the new-post composer (the home "What's happening?" box and the **Post** dialog), it adds one control:
@@ -110,7 +110,7 @@ Setup takes one tab in the side panel, plus an optional style guide and project 
 
    Only the sections you fill in are sent with each request. Changes save automatically.
 4. Optionally, add what you build on the **Projects** tab, up to 10 projects. Each one has a name, a description of up to 300 characters and a link. A fresh reply mentions a project only when it fits the post, and only with the facts you wrote. Projects without a name aren't sent. **Remove** asks you to confirm inline.
-5. When the header shows **Ready**, open a reply: the reply dialog, or the inline reply box on a post's page. On an empty box, click **Generate**. Once the box has text, whether a draft or your own, click **Rewrite** and pick **Polish**, **Punchier** or **Match style**, or click the **Refine** icon to delete it and generate a fresh reply. To polish a post of your own, write a draft in the home box or the **Post** dialog and click **Refine**. Review and edit the result before you post.
+5. When the header shows **Ready**, open a reply: the reply dialog, or the inline reply box on a post's page. On an empty box, click **Generate**. Once the box has text, whether a draft or your own, click **Rewrite** and pick **Polish**, **Punchier** or **Match style**, or click the **Regenerate** icon to try your last generation again. To polish a post of your own, write a draft in the home box or the **Post** dialog and click **Refine**. Review and edit the result before you post.
 
 Until a provider and key are set, the controls are greyed out, and clicking them opens the side panel. If an action fails, for example from a bad key, a rate limit or a timeout, a short message appears next to the controls. If you edit the reply box while an action runs, the result is dropped so it can't overwrite your edit.
 
@@ -128,7 +128,7 @@ These gaps are known and not yet fixed:
 - **X markup changes**: X can change its page structure at any time, which can stop the controls from appearing or from filling the box. If the extension can't verify the filled text, the controls show an error. Check the reply box, because X may have accepted part of the draft.
 - **Composers without controls**: in a multi-post reply thread or new thread, only the first box gets controls, and post **Refine** works on that box only. Inline reply boxes under individual comments and quotes get none.
 - **New post media**: post **Refine** sends only your text, not the photos or videos you attached.
-- **Theme switches**: the controls copy X's text colour when they're inserted. After you switch X's theme, close and reopen the composer to update it.
+- **Theme switches**: the controls copy X's text and background colours when they're inserted. After you switch X's theme, close and reopen the composer to update it.
 - **xAI**: x-companion calls xAI's Chat Completions endpoint, which xAI now labels legacy in favour of its Responses API. The endpoint still works, and xAI hasn't announced a shutdown date.
 - **Model lists**: the panel fetches models live when it opens, and when you change the provider or key. OpenAI and xAI models show their raw IDs.
 

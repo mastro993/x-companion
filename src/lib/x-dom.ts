@@ -30,16 +30,16 @@ interface FoundComposer extends Composer {
   kind: ComposerKind;
 }
 /**
- * What a control runs: an action, `refine`, which empties the box and then runs `reply`, or
+ * What a control runs: an action, `regenerate`, which reruns the composer's last generation, or
  * `refine-post`, which rewrites a new post's draft.
  */
-export type ControlAction = ActionId | 'refine' | 'refine-post';
-/** What runs while a control is busy: `refine` runs as `reply`. */
-export type RunningAction = Exclude<ControlAction, 'refine'>;
+export type ControlAction = ActionId | 'regenerate' | 'refine-post';
+/** What runs while a control is busy: `regenerate` runs as the action it reruns. */
+export type RunningAction = Exclude<ControlAction, 'regenerate'>;
 export interface ControlsState {
   ready: boolean; // setup done
   busy: RunningAction | null; // running in this composer
-  hasText: boolean; // the box has text: offer Refine and Rewrite instead of Generate, or enable post Refine
+  hasText: boolean; // the box has text: offer Regenerate and Rewrite instead of Generate, or enable post Refine
 }
 
 const LABELS: Record<RunningAction, { label: string; busy: string }> = {
@@ -142,7 +142,7 @@ const SETUP_HINT = 'x-companion: finish setup in the side panel';
 
 /**
  * Inserts our controls before X's Reply or Post button. A reply composer gets a Generate pill, a
- * Refine icon, and a Rewrite pill whose menu holds the other actions; a new post gets one Refine
+ * Regenerate icon, and a Rewrite pill whose menu holds the other actions; a new post gets one Refine
  * pill. `onClick` gets the clicked control and its action; null means the Rewrite pill was clicked
  * while its menu is off (setup unfinished or busy).
  * Idempotent: returns null if already there. Swaps controls of the wrong kind, e.g. injected
@@ -163,6 +163,8 @@ export function injectControls(
   wrap.setAttribute(MARK, c.kind);
   // ponytail: copied once, so a live theme switch leaves them stale until X re-mounts the composer
   wrap.style.color = getComputedStyle(c.editor).color; // X's theme text colour, no theme sniffing
+  const page = getComputedStyle(document.body).backgroundColor; // X paints its theme on body
+  if (page !== 'rgba(0, 0, 0, 0)') wrap.style.setProperty('--xc-page', page);
 
   const button = (className: string, action: ControlAction | null, ...content: Node[]) => {
     const btn = document.createElement('button');
@@ -187,18 +189,16 @@ export function injectControls(
     const menu = document.createElement('div');
     menu.className = 'xc-menu';
     menu.popover = 'auto';
-    const page = getComputedStyle(document.body).backgroundColor; // X paints its theme on body
-    if (page !== 'rgba(0, 0, 0, 0)') menu.style.backgroundColor = page;
     for (const action of ACTIONS.filter((a) => a !== 'reply')) {
       const item = button('xc-menu-item', action, document.createTextNode(LABELS[action].label));
       item.addEventListener('click', () => menu.hidePopover());
       menu.append(item);
     }
-    const generate = button('xc-reply-btn', 'reply', icon(SPARKLE), document.createElement('span'));
-    const refine = button('xc-reply-btn xc-reply-btn--icon', 'refine', icon(REFRESH));
-    refine.setAttribute('aria-label', 'Refine reply with x-companion'); // the icon has no visible text
+    const generate = button('xc-reply-btn xc-reply-btn--solid', 'reply', icon(SPARKLE), document.createElement('span'));
+    const regenerate = button('xc-reply-btn xc-reply-btn--icon', 'regenerate', icon(REFRESH));
+    regenerate.setAttribute('aria-label', 'Regenerate with x-companion'); // the icon has no visible text
     const rewrite = button('xc-reply-btn', null, icon(SPARKLE), document.createElement('span'), icon(CHEVRON));
-    wrap.append(generate, refine, rewrite, menu);
+    wrap.append(generate, regenerate, rewrite, menu);
   }
 
   // ponytail: forces a row on react-native-web column hosts (compact detail composer); revisit if X's layout shifts
@@ -226,7 +226,7 @@ function setState(el: Element, { ready, busy }: ControlsState) {
 }
 
 /**
- * Reply composer: Generate on an empty box, and Refine and Rewrite on a filled one. New post:
+ * Reply composer: Generate on an empty box, and Regenerate and Rewrite on a filled one. New post:
  * Refine, disabled until the box has a draft to refine.
  */
 export function renderControls(wrap: Element, state: ControlsState): void {
@@ -242,20 +242,20 @@ export function renderControls(wrap: Element, state: ControlsState): void {
     return;
   }
 
-  const [generate, refine, rewrite] = wrap.querySelectorAll<HTMLButtonElement>(':scope > .xc-reply-btn');
+  const [generate, regenerate, rewrite] = wrap.querySelectorAll<HTMLButtonElement>(':scope > .xc-reply-btn');
   const menu = wrap.querySelector<HTMLElement>('.xc-menu');
-  if (!generate || !refine || !rewrite || !menu) return;
+  if (!generate || !regenerate || !rewrite || !menu) return;
   const rewriting = busy ? busy !== 'reply' : hasText;
   const btn = rewriting ? rewrite : generate;
   generate.hidden = rewriting;
-  refine.hidden = rewrite.hidden = !rewriting;
+  regenerate.hidden = rewrite.hidden = !rewriting;
 
   setLabel(btn, busy ? LABELS[busy].busy : rewriting ? 'Rewrite' : LABELS.reply.label);
   const verb = rewriting ? (busy ? 'Rewriting draft' : 'Rewrite draft') : busy ? 'Generating reply' : 'Generate reply';
   attr(btn, 'aria-label', `${verb} with x-companion`);
-  for (const el of [btn, refine]) setState(el, state);
+  for (const el of [btn, regenerate]) setState(el, state);
   attr(btn, 'title', !ready && SETUP_HINT);
-  refine.title = ready ? 'Refine' : SETUP_HINT; // the icon has no visible text
+  regenerate.title = ready ? 'Regenerate' : SETUP_HINT; // the icon has no visible text
 
   // The invoker is also the menu's implicit anchor and is exempt from its light dismiss.
   const armed = ready && !busy && rewriting;

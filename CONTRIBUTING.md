@@ -93,18 +93,19 @@ x-companion has three parts that talk through extension messages, plus the provi
 
 - **Background service worker** (`src/entrypoints/background.ts`):
   - Enables the side panel and toolbar icon per tab, on x.com only. The manifest has no global `side_panel` entry, so the panel never follows you to other sites.
-  - Answers the content script: it reports the ready status, opens the side panel and runs actions (generate or rewrite a reply, refine a new post). Reply Refine reaches it as a plain generate, after the content script empties the box. Post Refine is its own `refine-post` request: just the draft, which the background refuses when empty.
+  - Answers the content script: it reports the ready status, opens the side panel and runs actions (generate or rewrite a reply, refine a new post). Reply Regenerate reaches it as the action it reruns: a rewrite of the text that action started from (or of the user's edit, if they changed the result), or a plain generate after the content script empties the box. Post Refine is its own `refine-post` request: just the draft, which the background refuses when empty.
   - Calls the provider API directly, with a 60s timeout. A keepalive holds the service worker open during long calls.
   - Pushes ready-status changes to open x.com tabs.
 - **Content script** (`src/entrypoints/x.content/`, logic in `src/lib/x-dom.ts`):
   - Watches the page for composers. Reply composers: the reply dialog, the inline composer on a post page and the narrow-layout `/compose/post` page. New-post composers: the home box, the **Post** dialog and its narrow-layout page. A composer is a reply when the post it answers is there, and a new post when it has none and no quoted post.
-  - Inserts the controls before X's **Reply** button: **Generate** on an empty box, then the **Refine** icon and **Rewrite** with its menu once the box has text. Before the **Post** button, a single **Refine** pill, disabled while the box is empty. Quote composers get no controls. If a composer turns out to be the other kind once X finishes rendering, its controls are swapped.
+  - Inserts the controls before X's **Reply** button: **Generate**, a filled pill, on an empty box, then the **Regenerate** icon and **Rewrite** with its menu once the box has text. Before the **Post** button, a single **Refine** pill, disabled while the box is empty. Quote composers get no controls. If a composer turns out to be the other kind once X finishes rendering, its controls are swapped.
   - The Rewrite menu is a native popover with CSS anchor positioning, so it sits in the top layer and X's overflow can't clip it.
   - Reads the target post: the author, the text with emoji, photos and video thumbnails with their alt text, the quoted post and whether **Show more** cut it off.
   - On a post's page, also reads the conversation around it: the posts above the target, and its author's run of posts right below it. For a reply below the main post, the posts above are the main post, the ones above it and, inside the main author's own thread, that thread's earlier parts. A timeline isn't a conversation, so it reads none there.
   - The reply dialog shows a stripped copy of the post, without media or quote card. So the content script takes the media, the quoted post and the conversation from the only post on the page that matches the copy by author and text. When several match, or none is on the page any more (the narrow layout navigates away), it uses the post it read when the **Reply** button was clicked, or when X's `r` shortcut was pressed on a focused post.
   - Reads the user's own @handle from the side navigation's profile link, so the prompt can say which posts are theirs.
   - Fills the Draft.js editor with a synthetic paste, then checks the result. A result is dropped if the box changed while the action ran.
+  - Remembers each reply composer's last generation for **Regenerate**: its action, its page and post, the text it worked on and what it left in the box. Regenerate reruns a rewrite on that text while the box still holds the result, else on the box's text. After a fresh reply, or with no generation for that page and post, it writes a fresh reply.
 - **Side panel** (`src/entrypoints/sidepanel/`, `src/components/sidepanel/`):
   - Built with React 19, shadcn/ui (Base UI) and Tailwind v4, in X's colour palette.
   - Follows the system light or dark theme.
@@ -147,6 +148,7 @@ src/
     llm.ts                 provider HTTP adapters
     jev.ts                 Jev decision-model adapter (not used yet)
     prompts/               one prompt per action, shared prompt blocks
+    regenerate.ts          what Regenerate reruns, from the last generation
     background-utils.ts    URL check + untrusted message validation
     x-dom.ts               every X selector and DOM routine
   assets/tailwind.css      theme tokens (side panel only)
@@ -187,6 +189,7 @@ The unit tests use Vitest, and the DOM tests run in happy-dom. They cover:
 
 - provider request and response handling, with `fetch` stubbed
 - the prompts and message validation
+- what **Regenerate** reruns after each kind of generation
 - settings status, the stored-settings migration and where the keys are stored
 - error text cleanup before it reaches x.com
 - the side panel's key field, model reload, style guide saving and project list
@@ -207,23 +210,25 @@ You need an X account and an API key for at least one provider. Use `pnpm dev`, 
    - On the **Projects** tab, add a project. Its **Name** field gets focus. Fill in the fields: the card shows **Saved** shortly after you stop typing. Switch tabs and back: the project kept its text. **Remove** asks to confirm, and **Cancel** keeps it. **Add project** turns off at 10 projects.
 3. **Placement**:
    - **Generate** appears left of **Reply** in the reply dialog (the reply icon under a timeline post) and in the inline reply box on a post's own page.
-   - Type a character: **Generate** becomes **Rewrite**, with the **Refine** icon on its left. Delete it: **Generate** comes back alone.
+   - With setup done, **Generate** on an empty box is a filled pill that doesn't look greyed out, while X's **Reply** is.
+   - Type a character: **Generate** becomes **Rewrite**, with the **Regenerate** icon on its left. Delete it: **Generate** comes back alone.
    - The home “What's happening?” box and the **Post** dialog show one **Refine** pill left of **Post**, greyed and unclickable while the box is empty. Type a character: it turns on.
    - No controls appear in the quote dialog.
 4. **Not ready**:
    - Remove the active provider's API key. The controls turn grey.
-   - Click **Generate**, then type something and click **Refine** and **Rewrite**. Each opens the side panel, and no menu opens.
+   - Click **Generate**, then type something and click **Regenerate** and **Rewrite**. Each opens the side panel, and no menu opens.
    - Paste the key again. The controls become active without a page reload.
 5. **Generate**:
    - Click **Generate**. It shows “Generating…”, then the draft appears in the reply box and the control becomes **Rewrite**.
    - Confirm that X's **Reply** button is enabled, that you can edit the text, and that nothing was posted.
    - Type into the box while it shows “Generating…”. The result is dropped with a message, and your text stays.
-   - With text in the box, click **Refine**. The box empties and **Generate** shows “Generating…”, then a fresh reply fills the box.
-   - Go offline and click **Refine**. The box empties, then your text comes back with an error message.
+   - Click **Regenerate**. The box empties and **Generate** shows “Generating…”, then a fresh reply fills the box.
+   - Go offline and click **Regenerate**. The box empties, then your text comes back with an error message.
 6. **Rewrite**:
    - Click **Rewrite**. A menu with **Polish**, **Punchier** and **Match style** opens under it, or above it when there's no room below. Clicking outside it or pressing Escape closes it.
    - Pick each action on a multi-line draft. The pill shows its progress (“Polishing…”, “Rewriting…”), then the rewrite replaces the draft and keeps its line breaks.
    - **Polish** on a draft that needs no fixes leaves the box as it was.
+   - Write a draft, pick **Polish**, then click **Regenerate**. The pill shows “Polishing…”, and the provider request's `<draft>` holds your original text, not the polished one. Edit the result and click **Regenerate** again: the `<draft>` holds your edit.
    - In the home box, write a rough post and click **Refine**. It shows “Refining…”, then the refined post replaces the draft and nothing was posted. The provider request holds only a `<draft>` block, with no `<post>`.
 7. **Errors**: use a bad key, or go offline, and run an action. A short message appears next to the controls for about 6s.
 8. **Context**: open the service worker's DevTools (see [Debug the extension](#debug-the-extension)) on its **Network** tab, generate once in each case below, and check the user message of the provider request:
@@ -234,7 +239,7 @@ You need an X account and an API key for at least one provider. Use `pnpm dev`, 
    - With a model that can't read images, such as a text-only OpenRouter model, the first request fails and a second one, without images, succeeds.
 9. **Each provider**: for every provider you have a key for, switch the active provider and generate once.
 10. **Narrow window**: shrink the window until X switches to its narrow layout, where replies open as a `/compose/post` page. The controls still appear, switch between Generate and Rewrite as you type, and fill the box.
-11. **Themes**: under X's Default and Lights out themes, the controls and the Rewrite menu stay readable. After you switch theme, reopen the composer.
+11. **Themes**: under X's Default and Lights out themes, the controls, including the filled **Generate** pill, and the Rewrite menu stay readable. After you switch theme, reopen the composer.
 
 ## Debug the extension
 
