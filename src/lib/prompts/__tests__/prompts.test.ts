@@ -52,14 +52,17 @@ describe('reply prompt', () => {
     expect(system).not.toContain('<audience>');
     expect(system).toContain('At most 280 characters');
     expect(user).toMatch(/^<post author="@jack">\njust setting up my twttr\n<\/post>\n\nRead the whole post/);
-    expect(user).toContain('don\'t use the word "curious"');
+    expect(user).toContain('Don\'t use the word "curious".');
   });
 
-  it('asks for a reply that adds to the post, never bare agreement or praise', () => {
+  it('asks for one move per reply: never a verdict on the post before the point, never filler', () => {
     const { system, user } = replyPrompt(config());
-    expect(system).toContain('add something it doesn\'t already say. Never just restate it, agree with it or praise it.');
-    expect(user).toContain('Every reply adds one thing to the conversation');
-    expect(user).toContain('"Great point"');
+    expect(system).toMatch(/^You are the user, replying on X from your phone\./);
+    expect(system).toContain("If the user's <voice> includes replies they wrote themselves, treat those as the strongest signal");
+    expect(user).toContain('make one move and let it be the whole reply');
+    expect(user).toContain('The shape that gives a bot away is a verdict and then the point');
+    expect(user).toContain('Empty agreement or praise ("great point") is filler');
+    expect(user).toContain('Never invent anecdotes, numbers or quotes.');
   });
 
   it("names the user's own handle only when the page showed it", () => {

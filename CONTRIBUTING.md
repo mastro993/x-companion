@@ -125,6 +125,7 @@ x-companion has three parts that talk through extension messages, plus the provi
   - `PROMPTS` in `index.ts` maps each action in `ACTIONS` (`src/lib/messages.ts`) to its prompt. To add an action, add its ID there, write its prompt file and register it, then give it a label in `src/lib/x-dom.ts`.
   - The rewrite actions share `rewrite.ts`, so each of their files holds only its instruction. The shared blocks (style guide, projects, the post with its conversation and quoted post, image markers, delimiter stripping) live in `shared.ts`.
   - Each post is its own tagged block: `<earlier>` posts, then the target `<post>`, then `<later>` posts, each with any `<quote>` inside. Media show as `[Image N]` or `[Video N]` markers. Up to 8 pictures are attached, numbered in priority order: the target's, its quote's, then the conversation's, nearest first.
+  - `reply.ts` asks for one move per reply, such as a reaction to one detail, a joke, a guess or an answer, and never a verdict on the post followed by the point ("X is rough. Y"), the most common shape of AI replies. It describes what a human reply looks like and shows a few varied examples rather than listing banned phrases, which tends to prime them. Past replies in the user's `<voice>` outrank its style advice.
   - A fresh reply is capped at 280 characters. A rewrite and a post refine keep that cap, or the draft's length if it's longer.
 
 ## Project structure
