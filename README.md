@@ -105,7 +105,7 @@ Setup takes one tab in the side panel, plus an optional style guide and project 
 3. Optionally, fill in the style guide on the **Style** tab. It has four sections, and each one holds up to 1000 characters:
    - **Persona**: who you are and your main interests.
    - **Audience**: the people you're speaking to and what resonates with them.
-   - **Style & Vocabulary**: your tone, structure and signature phrases. Paste two or three of your past replies here: examples teach the model your style better than adjectives do.
+   - **Style & Vocabulary**: your tone, structure and signature phrases. Paste a few of your past replies here: examples teach the model your style better than adjectives do. A fresh reply follows their length, casing and punctuation over its own defaults.
    - **Rules**: dos and don'ts the AI must always respect, such as "no hashtags" or "always reply in English".
 
    Only the sections you fill in are sent with each request. Changes save automatically.
